@@ -197,27 +197,28 @@ class GlassBoxCodeSynthesizer:
             else:
                 col_defs.append(f'        "{name}": [f"{name}_{{i}}" for i in range(n)],')
 
-        col_block = "\n".join(col_defs)
+        col_block = "\n".join(col_defs) + "\n"
 
-        script = textwrap.dedent(f"""\
-            import uuid
-            import numpy as np
-            import pandas as pd
-            from typing import Optional
-
-
-            def generate(row_count: int, seed: int) -> pd.DataFrame:
-                \"\"\"
-                Glass Box generated function for table: {table_name}
-                Stateless — same seed always produces same DataFrame.
-                \"\"\"
-                n = row_count
-                rng = np.random.default_rng(seed)
-                data = {{
-            {col_block}
-                }}
-                return pd.DataFrame(data)
-            """)
+        # Build via explicit concatenation to avoid textwrap.dedent/col_block indent issues
+        script = (
+            "import uuid\n"
+            "import numpy as np\n"
+            "import pandas as pd\n"
+            "from typing import Optional\n"
+            "\n"
+            "\n"
+            f"def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+            '    """\n'
+            f"    Glass Box generated function for table: {table_name}\n"
+            "    Stateless \u2014 same seed always produces same DataFrame.\n"
+            '    """\n'
+            "    n = row_count\n"
+            "    rng = np.random.default_rng(seed)\n"
+            "    data = {\n"
+            + col_block
+            + "    }\n"
+            "    return pd.DataFrame(data)\n"
+        )
         return script
 
     def _minimal_script(self, row_count: int, seed: int) -> str:
