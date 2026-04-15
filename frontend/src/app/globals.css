@@ -1,0 +1,107 @@
+/* ─── External fonts ────────────────────────────────────────────────────── */
+/* Satoshi (App design system — fontshare CDN) */
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500&display=swap");
+
+/* Tailwind v4 */
+@import "tailwindcss";
+
+/* ─── SynthFlow Design Tokens ───────────────────────────────────────────── */
+@theme {
+  /* ── Font families ──────────────────────────────────────────────────── */
+  /* Marketing (Stripe-inspired) */
+  --font-geist:       "Geist", system-ui, -apple-system, sans-serif;
+  --font-code-marketing: "Source Code Pro", ui-monospace, monospace;
+
+  /* App (Cursor-inspired) */
+  --font-satoshi:     "Satoshi", system-ui, sans-serif;
+  --font-serif:       "Instrument Serif", ui-serif, Georgia, serif;
+  --font-mono:        "JetBrains Mono", ui-monospace, monospace;
+
+  /* Tailwind defaults — marketing pages use Geist as "sans" */
+  --font-sans:        "Geist", system-ui, -apple-system, sans-serif;
+
+  /* ── Logo ───────────────────────────────────────────────────────────── */
+  --color-logo:       #3d4043;
+
+  /* ── MARKETING palette (Design System A) ───────────────────────────── */
+  --color-m-purple:        #533afd;
+  --color-m-purple-hover:  #4434d4;
+  --color-m-purple-deep:   #2e2b8c;
+  --color-m-purple-light:  #b9b9f9;
+  --color-m-navy:          #061b31;
+  --color-m-white:         #ffffff;
+  --color-m-brand-dark:    #1c1e54;
+  --color-m-dark-navy:     #0d253d;
+  --color-m-body:          #64748d;
+  --color-m-label:         #273951;
+  --color-m-ruby:          #ea2261;
+  --color-m-magenta:       #f96bee;
+  --color-m-magenta-light: #ffd7ef;
+  --color-m-success:       #15be53;
+  --color-m-success-text:  #108c3d;
+  --color-m-warning:       #9b6829;
+  --color-m-error:         #ea2261;
+  --color-m-border:        #e5edf5;
+  --color-m-border-purple: #b9b9f9;
+  --color-m-border-soft:   #d6d9fc;
+
+  /* ── APP palette (Design System B) ─────────────────────────────────── */
+  --color-a-dark:          #26251e;
+  --color-a-cream:         #f2f1ed;
+  --color-a-light:         #e6e5e0;
+  --color-a-white:         #ffffff;
+  --color-a-black:         #000000;
+  --color-a-orange:        #f54e00;
+  --color-a-gold:          #c08532;
+  --color-a-error:         #cf2d56;
+  --color-a-success:       #1f8a65;
+
+  /* AI feature colors */
+  --color-a-thinking:      #dfa88f;
+  --color-a-search:        #9fc9a2;
+  --color-a-read:          #9fbbe0;
+  --color-a-edit:          #c0a8dd;
+
+  /* Surface scale */
+  --color-a-surface-100:   #f7f7f4;
+  --color-a-surface-200:   #f2f1ed;
+  --color-a-surface-300:   #ebeae5;
+  --color-a-surface-400:   #e6e5e0;
+  --color-a-surface-500:   #e1e0db;
+}
+
+/* ─── CSS variables (runtime) ───────────────────────────────────────────── */
+:root {
+  /* Marketing shadows */
+  --shadow-m-standard: rgba(50,50,93,0.25) 0px 30px 45px -30px, rgba(0,0,0,0.1) 0px 18px 36px -18px;
+  --shadow-m-ambient:  rgba(23,23,23,0.08) 0px 15px 35px 0px;
+  --shadow-m-subtle:   rgba(23,23,23,0.06) 0px 3px 6px;
+  --shadow-m-deep:     rgba(3,3,39,0.25) 0px 14px 21px -14px, rgba(0,0,0,0.1) 0px 8px 17px -8px;
+
+  /* App shadows */
+  --shadow-a-elevated: rgba(0,0,0,0.14) 0px 28px 70px, rgba(0,0,0,0.1) 0px 14px 32px;
+  --shadow-a-ambient:  rgba(0,0,0,0.02) 0px 0px 16px, rgba(0,0,0,0.008) 0px 0px 8px;
+  --shadow-a-focus:    rgba(0,0,0,0.1) 0px 4px 12px;
+
+  /* App borders */
+  --border-a:          rgba(38, 37, 30, 0.1);
+  --border-a-medium:   rgba(38, 37, 30, 0.2);
+  --border-a-strong:   rgba(38, 37, 30, 0.55);
+}
+
+/* ─── Base styles ───────────────────────────────────────────────────────── */
+html {
+  font-feature-settings: "ss01";   /* Geist geometric alternates on marketing pages */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: #ffffff;       /* Marketing default — app pages override via layout */
+  color: #061b31;
+  font-family: "Geist", system-ui, -apple-system, sans-serif;
+}
+
+/* ─── Typography helpers ─────────────────────────────────────────────────── */
+/* Marketing: all headlines weight 300, never 600-700 */
+/* App: Satoshi weight 400, negative tracking at display sizes */
