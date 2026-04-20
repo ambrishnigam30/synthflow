@@ -28,6 +28,40 @@ def _ok(data: object) -> dict:
     return {"data": data, "error": None}
 
 
+@router.get("", summary="List generations")
+async def list_generations(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    domain: str | None = Query(None),
+    generation_status: str | None = Query(None, alias="status"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    svc = GenerationService(db)
+    gens = await svc.list_generations(
+        user_id=user.id,
+        page=page,
+        page_size=page_size,
+        domain=domain,
+        status=generation_status,
+    )
+    items = [
+        GenerationListItem(
+            id=g.id,
+            session_id=g.session_id,
+            domain=g.domain,
+            sub_domain=g.sub_domain,
+            row_count=g.row_count,
+            status=g.status,
+            quality_score=g.quality_score,
+            created_at=g.created_at,
+            updated_at=g.updated_at,
+        ).model_dump()
+        for g in gens
+    ]
+    return _ok({"generations": items, "page": page, "page_size": page_size})
+
+
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_generation(
     body: GenerateRequest,
