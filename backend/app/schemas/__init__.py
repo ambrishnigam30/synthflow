@@ -7,13 +7,36 @@
 # ───────────────────────────────────────────────────────────────
 
 from app.schemas.auth import (
-    SignupRequest,
-    LoginRequest,
     GoogleAuthRequest,
+    LoginRequest,
     RefreshRequest,
-    UserProfile,
+    SignupRequest,
     TokenResponse,
     UpdateProfileRequest,
+    UserProfile,
+)
+from app.schemas.chat import (
+    ChatMessage,
+    ConversationListItem,
+    ConversationResponse,
+    CreateConversationRequest,
+    SendMessageRequest,
+    UpdateConversationRequest,
+)
+from app.schemas.dataset import (
+    ColumnSummary,
+    DatasetInfo,
+    DatasetQueryRequest,
+    DatasetQueryResponse,
+    DatasetUploadResponse,
+    QueryResult,
+)
+from app.schemas.generation import (
+    GenerateRequest,
+    GenerationListItem,
+    GenerationResponse,
+    GenerationStatus,
+    PhaseUpdate,
 )
 from app.schemas.llm_config import (
     LLMConfigCreateRequest,
@@ -22,14 +45,13 @@ from app.schemas.llm_config import (
 )
 
 __all__ = [
-    "SignupRequest",
-    "LoginRequest",
-    "GoogleAuthRequest",
-    "RefreshRequest",
-    "UserProfile",
-    "TokenResponse",
-    "UpdateProfileRequest",
-    "LLMConfigCreateRequest",
-    "LLMConfigResponse",
-    "LLMTestResponse",
+    "SignupRequest", "LoginRequest", "GoogleAuthRequest", "RefreshRequest",
+    "UserProfile", "TokenResponse", "UpdateProfileRequest",
+    "ChatMessage", "ConversationListItem", "ConversationResponse",
+    "CreateConversationRequest", "SendMessageRequest", "UpdateConversationRequest",
+    "DatasetInfo", "DatasetUploadResponse", "DatasetQueryRequest",
+    "DatasetQueryResponse", "ColumnSummary", "QueryResult",
+    "GenerateRequest", "GenerationResponse", "GenerationStatus",
+    "PhaseUpdate", "GenerationListItem",
+    "LLMConfigCreateRequest", "LLMConfigResponse", "LLMTestResponse",
 ]
