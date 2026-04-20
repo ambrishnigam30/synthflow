@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # CORS — restrict to frontend origin in production
     allowed_origins: list[str] = ["http://localhost:3000"]
 
+    # Payment providers (optional — graceful fallback when empty)
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+
     # App
     app_name: str = "SynthFlow"
     app_version: str = "2.0.0"
