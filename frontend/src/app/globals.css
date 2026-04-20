@@ -105,3 +105,37 @@ body {
 /* ─── Typography helpers ─────────────────────────────────────────────────── */
 /* Marketing: all headlines weight 300, never 600-700 */
 /* App: Satoshi weight 400, negative tracking at display sizes */
+
+/* ─── Custom animations ─────────────────────────────────────────────────── */
+@keyframes phase-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@utility animate-phase-pulse {
+  animation: phase-pulse 1.5s ease-in-out infinite;
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+@utility animate-scale-in {
+  animation: scale-in 0.2s ease-out forwards;
+}
+
+/* ─── Hover scale utility ───────────────────────────────────────────────── */
+@utility hover-scale {
+  transition: transform 150ms ease;
+  &:hover { transform: scale(1.02); }
+}

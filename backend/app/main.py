@@ -48,6 +48,11 @@ from app.api.conversations import router as conversations_router
 from app.api.generate import router as generate_router
 from app.api.chat import router as chat_router
 from app.api.datasets import router as datasets_router
+from app.api.billing import router as billing_router
+from app.api.teams import router as teams_router
+from app.api.api_keys import router as api_keys_router
+from app.api.webhooks import router as webhooks_router
+from app.api.public_api import router as public_api_router
 
 app.include_router(auth_router)
 app.include_router(llm_config_router)
@@ -55,6 +60,11 @@ app.include_router(conversations_router)
 app.include_router(generate_router)
 app.include_router(chat_router)
 app.include_router(datasets_router)
+app.include_router(billing_router)
+app.include_router(teams_router)
+app.include_router(api_keys_router)
+app.include_router(webhooks_router)
+app.include_router(public_api_router)
 
 
 # ── Health ───────────────────────────────────────────────────────────────────
