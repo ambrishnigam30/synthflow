@@ -168,6 +168,29 @@ def safe_json_loads(text: str) -> Any:
     )
 
 
+# ── Semantic type detection ────────────────────────────────────────────────
+
+def detect_semantic_type(col_name: str, data_type: str) -> str:
+    """
+    Detect the semantic type of a column based on its name and declared data type.
+
+    Rules (applied in order):
+      1. Column name ends with the literal suffix ``_at`` → ``"datetime"``.
+         Only the suffix counts; 'marks_math' is NOT a datetime column.
+      2. Otherwise, return *data_type* unchanged.
+
+    Args:
+        col_name:  Column name (e.g. ``"created_at"``, ``"marks_math"``).
+        data_type: Declared data type string (e.g. ``"integer"``, ``"string"``).
+
+    Returns:
+        Semantic type string — ``"datetime"`` or *data_type*.
+    """
+    if col_name.endswith("_at"):
+        return "datetime"
+    return data_type
+
+
 # ── Hashing & identity ─────────────────────────────────────────────────────
 
 def compute_prompt_hash(prompt: str) -> str:

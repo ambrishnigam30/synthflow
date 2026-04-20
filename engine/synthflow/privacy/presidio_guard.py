@@ -120,9 +120,13 @@ class PresidioPrivacyGuard:
         masked_columns: list[str] = []
 
         for col in df.columns:
-            if df[col].dtype != object:
+            col_dtype = df[col].dtype
+            # Accept object dtype (classic) and StringDtype (pandas 2.x/3.x default)
+            is_text = col_dtype == object or isinstance(col_dtype, pd.StringDtype)
+            if not is_text:
                 continue
-            col_entities, df[col] = self._scan_and_mask_series(df[col])
+            # Normalise to object dtype so comparisons and regex work uniformly
+            col_entities, df[col] = self._scan_and_mask_series(df[col].astype(object))
             if col_entities:
                 for entity_type, count in col_entities.items():
                     entities_detected[entity_type] = (

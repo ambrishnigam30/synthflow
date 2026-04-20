@@ -116,9 +116,10 @@ def test_validation_engine_uniqueness_passes_with_unique_pk(
 def test_validation_engine_null_policy_violation() -> None:
     """Null in a nullable=False column → null_policy score < 1.0."""
     engine = ValidationHygieneEngine()
+    pk_col = ColumnDefinition(name="id", data_type="string", is_primary_key=True)
     col = ColumnDefinition(name="name", data_type="string", nullable=False)
-    schema = SchemaDefinition(tables=[SchemaTable(name="t", columns=[col])])
-    df = pd.DataFrame({"name": ["Alice", None, "Carol"]})
+    schema = SchemaDefinition(tables=[SchemaTable(name="t", columns=[pk_col, col])])
+    df = pd.DataFrame({"id": ["1", "2", "3"], "name": ["Alice", None, "Carol"]})
     bundle = CausalKnowledgeBundle(domain="test", region=RegionInfo(country="US"))
     report = engine.audit(df, schema, ConstraintSet(), bundle)
     check = next(c for c in report.checks if c.check_name == "null_policy")
@@ -141,11 +142,12 @@ def test_validation_engine_enum_validity_passes(
 def test_validation_engine_enum_validity_violation() -> None:
     """Invalid enum value → enum_validity score < 1.0."""
     engine = ValidationHygieneEngine()
+    pk_col = ColumnDefinition(name="id", data_type="string", is_primary_key=True)
     col = ColumnDefinition(
         name="status", data_type="string", enum_values=["active", "inactive"]
     )
-    schema = SchemaDefinition(tables=[SchemaTable(name="t", columns=[col])])
-    df = pd.DataFrame({"status": ["active", "unknown_value", "inactive"]})
+    schema = SchemaDefinition(tables=[SchemaTable(name="t", columns=[pk_col, col])])
+    df = pd.DataFrame({"id": ["1", "2", "3"], "status": ["active", "unknown_value", "inactive"]})
     bundle = CausalKnowledgeBundle(domain="test", region=RegionInfo(country="US"))
     report = engine.audit(df, schema, ConstraintSet(), bundle)
     check = next(c for c in report.checks if c.check_name == "enum_validity")

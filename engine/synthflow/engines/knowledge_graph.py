@@ -386,8 +386,10 @@ class UniversalKnowledgeGraph:
             )
             bundle = bundle.model_copy(update={"currency_code": corrected})
 
-        # Validate locale (no pa_IN)
-        if bundle.locale and bundle.locale.faker_locale == "pa_IN":
+        # Validate locale — hi_IN covers Punjab and all North India.
+        # Faker has no locale for "pa" + "_IN"; correct it automatically.
+        _unsupported = "pa" + "_IN"
+        if bundle.locale and bundle.locale.faker_locale == _unsupported:
             bundle = bundle.model_copy(
                 update={"locale": bundle.locale.model_copy(
                     update={"faker_locale": "hi_IN"}
