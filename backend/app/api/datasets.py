@@ -45,7 +45,7 @@ async def upload_dataset(
 
     if len(file_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=413,
             detail={"message": "File exceeds the 50 MB upload limit.", "code": "FILE_TOO_LARGE"},
         )
 
@@ -59,7 +59,7 @@ async def upload_dataset(
         )
     except DatasetFileTooLargeError as exc:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=413,
             detail={"message": str(exc), "code": "FILE_TOO_LARGE"},
         ) from exc
 

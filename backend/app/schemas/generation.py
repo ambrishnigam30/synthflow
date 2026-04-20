@@ -35,14 +35,14 @@ class GenerationResponse(BaseModel):
     quality_score: float | None = None
     privacy_score: float | None = None
     glass_box_code: str | None = None
-    schema_json: dict[str, Any] | None = None
+    generation_schema: dict[str, Any] | None = None
     intent_json: dict[str, Any] | None = None
     error_message: str | None = None
     download_url: str | None = None
     created_at: datetime
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class GenerationStatus(BaseModel):

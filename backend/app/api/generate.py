@@ -109,7 +109,7 @@ async def get_generation_status(
             quality_score=gen.quality_score,
             privacy_score=gen.privacy_score,
             glass_box_code=gen.glass_box_code,
-            schema_json=gen.schema_json,
+            generation_schema=gen.schema_json,
             intent_json=gen.intent_json,
             error_message=gen.error_message,
             created_at=gen.created_at,
@@ -182,6 +182,6 @@ async def get_quality_report(
             "quality_score": gen.quality_score,
             "privacy_score": gen.privacy_score,
             "status": gen.status,
-            "schema": gen.schema_json,
+            "schema": gen.schema_json,  # raw DB field, not schema response field
         }
     )
