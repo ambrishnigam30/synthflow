@@ -27,7 +27,9 @@ export default function LoginPage() {
       const { access_token, refresh_token } = body.data;
       localStorage.setItem("sf_access", access_token);
       localStorage.setItem("sf_refresh", refresh_token);
-      window.location.href = "/app/dashboard";
+      // Set cookie so middleware can verify auth on protected routes (15 min)
+      document.cookie = `sf_access=${access_token}; path=/; max-age=900; SameSite=Strict`;
+      window.location.href = "/dashboard";
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
