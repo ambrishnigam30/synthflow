@@ -50,3 +50,8 @@ class TokenResponse(BaseModel):
 class UpdateProfileRequest(BaseModel):
     full_name: str | None = None
     avatar_url: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)

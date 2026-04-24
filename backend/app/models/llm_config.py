@@ -35,6 +35,9 @@ class LLMConfig(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.true()
     )
+    is_default: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, server_default=sa.false()
+    )
 
     __table_args__ = (
         sa.UniqueConstraint("user_id", "provider", name="uq_llm_config_user_provider"),

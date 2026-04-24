@@ -13,6 +13,7 @@ class LLMConfigCreateRequest(BaseModel):
     provider: str
     api_key: str
     model_name: str | None = None
+    is_default: bool = False
 
 
 class LLMConfigResponse(BaseModel):
@@ -21,6 +22,7 @@ class LLMConfigResponse(BaseModel):
     model_name: str | None
     masked_key: str
     is_active: bool
+    is_default: bool = False
 
     model_config = {"from_attributes": True}
 

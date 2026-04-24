@@ -14,13 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/authStore";
-import { authApi, usageApi } from "@/lib/api";
-
-function fmtRows(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-  return String(n);
-}
+import { authApi, billingApi } from "@/lib/api";
 
 // ── Nav item definition ──────────────────────────────────────────────────────
 
@@ -99,21 +93,30 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 
 // ── Plan badge ───────────────────────────────────────────────────────────────
 
+// Plan generation limits (hardcoded per plan — source of truth is billing)
+const PLAN_GEN_LIMITS: Record<string, number | null> = {
+  free: 10,
+  starter: 50,
+  pro: 200,
+  enterprise: null, // unlimited
+  business: null,   // unlimited
+};
+
 function PlanIndicator({ plan }: { plan: string }) {
   const [used, setUsed] = useState(0);
-  const [limit, setLimit] = useState(plan === "free" ? 1000 : 1_000_000);
+  const genLimit = PLAN_GEN_LIMITS[plan] ?? null;
 
   useEffect(() => {
-    usageApi.summary().then((s) => {
-      setUsed(s.rows_this_month);
-      setLimit(s.rows_limit);
+    billingApi.getUsage().then((u) => {
+      setUsed(u.generations_used);
     }).catch(() => {
       setUsed(0);
-      setLimit(plan === "free" ? 1000 : 1_000_000);
     });
   }, [plan]);
 
-  const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
+  const pct = genLimit !== null && genLimit > 0
+    ? Math.min((used / genLimit) * 100, 100)
+    : 0;
 
   return (
     <div className="px-4 pb-4">
@@ -151,7 +154,8 @@ function PlanIndicator({ plan }: { plan: string }) {
             Upgrade
           </Link>
         </div>
-        {plan === "free" && (
+
+        {genLimit !== null ? (
           <>
             <div
               className="rounded-full overflow-hidden mb-1"
@@ -169,9 +173,19 @@ function PlanIndicator({ plan }: { plan: string }) {
                 color: "rgba(38,37,30,0.45)",
               }}
             >
-              {fmtRows(used)} / {fmtRows(limit)} rows used
+              {used} / {genLimit} generations this month
             </p>
           </>
+        ) : (
+          <p
+            style={{
+              fontFamily: "system-ui",
+              fontSize: "11px",
+              color: "rgba(38,37,30,0.45)",
+            }}
+          >
+            Unlimited generations
+          </p>
         )}
       </div>
     </div>
@@ -182,12 +196,10 @@ function PlanIndicator({ plan }: { plan: string }) {
 
 function UserRow({ onLogout }: { onLogout: () => void }) {
   const user = useAuthStore((s) => s.user);
-  const initials = (user?.name || "U")
-    .split(" ")
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase() ?? "SF";
+  const displayName = user?.name?.trim() ?? "";
+  const initials = displayName
+    ? displayName.split(" ").map((w: string) => w[0]).slice(0, 2).join("").toUpperCase()
+    : (user?.email?.[0]?.toUpperCase() ?? "U");
 
   return (
     <div
@@ -198,7 +210,7 @@ function UserRow({ onLogout }: { onLogout: () => void }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={user.avatarUrl}
-          alt={user.name}
+          alt={displayName || user.email || "avatar"}
           className="w-7 h-7 rounded-full flex-shrink-0"
         />
       ) : (
@@ -228,7 +240,7 @@ function UserRow({ onLogout }: { onLogout: () => void }) {
             color: "#26251e",
           }}
         >
-          {user?.name ?? "User"}
+          {displayName || user?.email || "User"}
         </p>
         <p
           className="truncate"
@@ -372,9 +384,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       setUser({
         id: apiUser.id,
         email: apiUser.email,
-        name: apiUser.name,
+        // Backend returns full_name; map to authStore's name field
+        name: apiUser.full_name ?? "",
         plan: apiUser.plan,
-        avatarUrl: apiUser.avatar_url,
+        avatarUrl: apiUser.avatar_url ?? undefined,
       });
     }).catch(() => {
       // 401 is auto-redirected to /login by api.ts

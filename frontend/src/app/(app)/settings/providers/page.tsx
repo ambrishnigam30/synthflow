@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Eye, EyeOff, CheckCircle, Circle, RefreshCw } from "lucide-react";
+import { llmConfigApi, type LLMProviderConfig } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -11,16 +12,22 @@ interface Provider {
   logo: string;
   models: string[];
   placeholder: string;
-  docsUrl: string;
 }
 
 interface ProviderState {
+  /** Key typed by user. Empty = use stored key (don't re-save). */
   apiKey: string;
   model: string;
   isDefault: boolean;
+  /** Whether a saved config exists in the DB for this provider. */
+  isSaved: boolean;
   status: "unconfigured" | "connected" | "error";
   testing: boolean;
-  saved: boolean;
+  testResult: { success: boolean; message: string } | null;
+  saving: boolean;
+  /** Brief "Saved ✓" flash after successful save. */
+  savedFlash: boolean;
+  settingDefault: boolean;
 }
 
 // ── Provider definitions ──────────────────────────────────────────────────────
@@ -32,7 +39,6 @@ const PROVIDERS: Provider[] = [
     logo: "G",
     models: ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash"],
     placeholder: "AIza…",
-    docsUrl: "#",
   },
   {
     id: "openai",
@@ -40,7 +46,6 @@ const PROVIDERS: Provider[] = [
     logo: "⬡",
     models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1-mini"],
     placeholder: "sk-…",
-    docsUrl: "#",
   },
   {
     id: "groq",
@@ -48,9 +53,23 @@ const PROVIDERS: Provider[] = [
     logo: "G",
     models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
     placeholder: "gsk_…",
-    docsUrl: "#",
   },
 ];
+
+function initialState(p: Provider, i: number): ProviderState {
+  return {
+    apiKey: "",
+    model: p.models[0],
+    isDefault: i === 0,
+    isSaved: false,
+    status: "unconfigured",
+    testing: false,
+    testResult: null,
+    saving: false,
+    savedFlash: false,
+    settingDefault: false,
+  };
+}
 
 // ── Logo mark ─────────────────────────────────────────────────────────────────
 
@@ -79,14 +98,14 @@ function ProviderCard({
   provider,
   state,
   onChange,
-  onTestConnection,
+  onTest,
   onSave,
   onSetDefault,
 }: {
   provider: Provider;
   state: ProviderState;
   onChange: (patch: Partial<ProviderState>) => void;
-  onTestConnection: () => void;
+  onTest: () => void;
   onSave: () => void;
   onSetDefault: () => void;
 }) {
@@ -108,6 +127,13 @@ function ProviderCard({
         <Circle size={12} strokeWidth={1.5} /> Not configured
       </span>
     );
+
+  // Determine whether "Save" is valid: requires a key in the input field
+  const canSave = state.apiKey.trim().length > 0;
+  // "Test" uses the stored DB key — only works if provider is saved
+  const canTest = state.isSaved && !state.testing;
+  // "Set as default" only works if saved and not already default
+  const canSetDefault = state.isSaved && !state.isDefault;
 
   return (
     <div
@@ -152,7 +178,7 @@ function ProviderCard({
         </div>
         <button
           onClick={onSetDefault}
-          disabled={state.isDefault}
+          disabled={!canSetDefault || state.settingDefault}
           style={{
             background: "none",
             border: "1px solid rgba(38,37,30,0.12)",
@@ -160,11 +186,11 @@ function ProviderCard({
             padding: "5px 10px",
             fontFamily: "system-ui",
             fontSize: "11px",
-            color: state.isDefault ? "rgba(38,37,30,0.3)" : "rgba(38,37,30,0.55)",
-            cursor: state.isDefault ? "not-allowed" : "pointer",
+            color: canSetDefault ? "rgba(38,37,30,0.55)" : "rgba(38,37,30,0.3)",
+            cursor: canSetDefault ? "pointer" : "not-allowed",
           }}
         >
-          {state.isDefault ? "Default" : "Set as default"}
+          {state.settingDefault ? "Setting…" : state.isDefault ? "Default" : "Set as default"}
         </button>
       </div>
 
@@ -189,8 +215,12 @@ function ProviderCard({
             <input
               type={showKey ? "text" : "password"}
               value={state.apiKey}
-              onChange={(e) => onChange({ apiKey: e.target.value, status: "unconfigured", saved: false })}
-              placeholder={provider.placeholder}
+              onChange={(e) => onChange({ apiKey: e.target.value, testResult: null })}
+              placeholder={
+                state.isSaved
+                  ? "Enter new key to update (current key is saved)"
+                  : provider.placeholder
+              }
               style={{
                 width: "100%",
                 background: "transparent",
@@ -271,11 +301,35 @@ function ProviderCard({
         </select>
       </div>
 
+      {/* Test result */}
+      {state.testResult && (
+        <div
+          className="mb-3 px-3 py-2 rounded-[6px]"
+          style={{
+            background: state.testResult.success
+              ? "rgba(31,138,101,0.08)"
+              : "rgba(207,45,86,0.06)",
+            border: `1px solid ${state.testResult.success ? "rgba(31,138,101,0.2)" : "rgba(207,45,86,0.2)"}`,
+          }}
+        >
+          <p
+            style={{
+              fontFamily: "system-ui",
+              fontSize: "12px",
+              color: state.testResult.success ? "#1f8a65" : "#cf2d56",
+            }}
+          >
+            {state.testResult.success ? "✓ " : "✗ "}
+            {state.testResult.message}
+          </p>
+        </div>
+      )}
+
       {/* Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <button
-          onClick={onTestConnection}
-          disabled={!state.apiKey || state.testing}
+          onClick={onTest}
+          disabled={!canTest}
           className="flex items-center gap-1.5 transition-all"
           style={{
             background: "#ebeae5",
@@ -284,15 +338,16 @@ function ProviderCard({
             padding: "9px 14px",
             fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
             fontSize: "13px",
-            color: !state.apiKey ? "rgba(38,37,30,0.3)" : "#26251e",
-            cursor: !state.apiKey ? "not-allowed" : "pointer",
+            color: !canTest ? "rgba(38,37,30,0.3)" : "#26251e",
+            cursor: !canTest ? "not-allowed" : "pointer",
           }}
           onMouseEnter={(e) => {
-            if (state.apiKey) (e.currentTarget as HTMLElement).style.color = "#cf2d56";
+            if (canTest) (e.currentTarget as HTMLElement).style.color = "#cf2d56";
           }}
           onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.color = !state.apiKey ? "rgba(38,37,30,0.3)" : "#26251e";
+            (e.currentTarget as HTMLElement).style.color = !canTest ? "rgba(38,37,30,0.3)" : "#26251e";
           }}
+          title={!state.isSaved ? "Save a key first to test it" : undefined}
         >
           <RefreshCw size={13} strokeWidth={1.5} className={state.testing ? "animate-spin" : ""} />
           {state.testing ? "Testing…" : "Test connection"}
@@ -300,29 +355,21 @@ function ProviderCard({
 
         <button
           onClick={onSave}
-          disabled={!state.apiKey}
+          disabled={!canSave || state.saving}
           className="transition-opacity hover:opacity-90"
           style={{
-            background: !state.apiKey ? "rgba(38,37,30,0.2)" : "#f54e00",
+            background: !canSave || state.saving ? "rgba(38,37,30,0.2)" : "#f54e00",
             border: "none",
             borderRadius: "8px",
             padding: "9px 16px",
             fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
             fontSize: "13px",
             color: "#ffffff",
-            cursor: !state.apiKey ? "not-allowed" : "pointer",
+            cursor: !canSave || state.saving ? "not-allowed" : "pointer",
           }}
         >
-          {state.saved ? "Saved ✓" : "Save"}
+          {state.saving ? "Saving…" : state.savedFlash ? "Saved ✓" : "Save"}
         </button>
-
-        {state.status === "error" && (
-          <span
-            style={{ fontFamily: "system-ui", fontSize: "12px", color: "#cf2d56" }}
-          >
-            Connection failed
-          </span>
-        )}
       </div>
     </div>
   );
@@ -332,42 +379,109 @@ function ProviderCard({
 
 export default function ProvidersPage() {
   const [states, setStates] = useState<Record<string, ProviderState>>(
-    Object.fromEntries(
-      PROVIDERS.map((p, i) => [
-        p.id,
-        {
-          apiKey: "",
-          model: p.models[0],
-          isDefault: i === 0,
-          status: "unconfigured",
-          testing: false,
-          saved: false,
-        },
-      ])
-    )
+    Object.fromEntries(PROVIDERS.map((p, i) => [p.id, initialState(p, i)]))
   );
+  const [loading, setLoading] = useState(true);
+
+  // Load existing configs from DB on mount
+  useEffect(() => {
+    llmConfigApi.list().then((configs: LLMProviderConfig[]) => {
+      setStates((prev) => {
+        const next = { ...prev };
+        // Reset all to unconfigured first
+        for (const p of PROVIDERS) {
+          next[p.id] = { ...next[p.id], isSaved: false, status: "unconfigured", isDefault: false };
+        }
+        // Apply loaded configs
+        for (const cfg of configs) {
+          if (next[cfg.provider]) {
+            const prov = PROVIDERS.find((p) => p.id === cfg.provider);
+            next[cfg.provider] = {
+              ...next[cfg.provider],
+              model: cfg.model_name ?? prov?.models[0] ?? "",
+              isDefault: cfg.is_default,
+              isSaved: true,
+              status: "connected",
+            };
+          }
+        }
+        // If no provider is default but some are saved, make the first saved one default
+        const hasSavedDefault = configs.some((c) => c.is_default);
+        if (!hasSavedDefault && configs.length > 0) {
+          const firstSaved = configs[0].provider;
+          if (next[firstSaved]) next[firstSaved].isDefault = true;
+        }
+        return next;
+      });
+    }).catch(() => {
+      // Silently fall back to unconfigured state
+    }).finally(() => setLoading(false));
+  }, []);
 
   function patch(id: string, update: Partial<ProviderState>) {
     setStates((prev) => ({ ...prev, [id]: { ...prev[id], ...update } }));
   }
 
   async function handleTest(id: string) {
-    patch(id, { testing: true, status: "unconfigured" });
-    await new Promise((r) => setTimeout(r, 1200));
-    patch(id, { testing: false, status: "connected" });
+    patch(id, { testing: true, testResult: null });
+    try {
+      const result = await llmConfigApi.test(id);
+      patch(id, {
+        testing: false,
+        testResult: { success: result.success, message: result.message },
+        status: result.success ? "connected" : "error",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Test failed";
+      patch(id, { testing: false, testResult: { success: false, message: msg }, status: "error" });
+    }
   }
 
   async function handleSave(id: string) {
-    await new Promise((r) => setTimeout(r, 400));
-    patch(id, { saved: true });
-    setTimeout(() => patch(id, { saved: false }), 2500);
+    const state = states[id];
+    if (!state.apiKey.trim()) return;
+    patch(id, { saving: true });
+    try {
+      await llmConfigApi.save(id, state.apiKey.trim(), state.model, state.isDefault);
+      patch(id, {
+        saving: false,
+        savedFlash: true,
+        isSaved: true,
+        status: "connected",
+        apiKey: "", // clear input after save; stored key is now in DB
+      });
+      setTimeout(() => patch(id, { savedFlash: false }), 2500);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Save failed";
+      patch(id, { saving: false, testResult: { success: false, message: msg } });
+    }
   }
 
-  function handleSetDefault(id: string) {
-    setStates((prev) =>
-      Object.fromEntries(
-        Object.entries(prev).map(([k, v]) => [k, { ...v, isDefault: k === id }])
-      )
+  async function handleSetDefault(id: string) {
+    patch(id, { settingDefault: true });
+    try {
+      await llmConfigApi.setDefault(id);
+      // Update all providers: only this one is default now
+      setStates((prev) => {
+        const next = { ...prev };
+        for (const key of Object.keys(next)) {
+          next[key] = { ...next[key], isDefault: key === id, settingDefault: false };
+        }
+        return next;
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not set default";
+      patch(id, { settingDefault: false, testResult: { success: false, message: msg } });
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="max-w-[580px]">
+        <p style={{ fontFamily: "system-ui", fontSize: "13px", color: "rgba(38,37,30,0.4)" }}>
+          Loading provider configurations…
+        </p>
+      </div>
     );
   }
 
@@ -392,9 +506,9 @@ export default function ProvidersPage() {
           provider={provider}
           state={states[provider.id]}
           onChange={(update) => patch(provider.id, update)}
-          onTestConnection={() => void handleTest(provider.id)}
+          onTest={() => void handleTest(provider.id)}
           onSave={() => void handleSave(provider.id)}
-          onSetDefault={() => handleSetDefault(provider.id)}
+          onSetDefault={() => void handleSetDefault(provider.id)}
         />
       ))}
     </div>

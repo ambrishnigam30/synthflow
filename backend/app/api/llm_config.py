@@ -59,10 +59,22 @@ async def upsert_llm_config(
     )
     existing: LLMConfig | None = result.scalar_one_or_none()
 
+    # If setting as default, unset all other providers first
+    if body.is_default:
+        all_result = await db.execute(
+            select(LLMConfig).where(
+                LLMConfig.user_id == current_user.id,
+                LLMConfig.is_active == True,  # noqa: E712
+            )
+        )
+        for other in all_result.scalars().all():
+            other.is_default = False
+
     if existing is not None:
         existing.encrypted_api_key = encrypted
         existing.model_name = body.model_name
         existing.is_active = True
+        existing.is_default = body.is_default
         config = existing
     else:
         config = LLMConfig(
@@ -72,6 +84,7 @@ async def upsert_llm_config(
             encrypted_api_key=encrypted,
             model_name=body.model_name,
             is_active=True,
+            is_default=body.is_default,
         )
         db.add(config)
 
@@ -92,6 +105,7 @@ async def upsert_llm_config(
         model_name=config.model_name,
         masked_key=_mask_key(config.encrypted_api_key),
         is_active=config.is_active,
+        is_default=config.is_default,
     )
     return _ok(response.model_dump())
 
@@ -116,6 +130,7 @@ async def list_llm_configs(
             model_name=c.model_name,
             masked_key=_mask_key(c.encrypted_api_key),
             is_active=c.is_active,
+            is_default=c.is_default,
         ).model_dump()
         for c in configs
     ]
@@ -172,6 +187,36 @@ async def test_llm_config(
     success, message = await _test_provider_key(provider, api_key)
     response = LLMTestResponse(success=success, message=message)
     return _ok(response.model_dump())
+
+
+@router.patch("/{provider}/default")
+async def set_default_provider(
+    provider: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Set the given provider as the default without requiring the API key again."""
+    all_result = await db.execute(
+        select(LLMConfig).where(
+            LLMConfig.user_id == current_user.id,
+            LLMConfig.is_active == True,  # noqa: E712
+        )
+    )
+    configs = all_result.scalars().all()
+    found = False
+    for c in configs:
+        c.is_default = c.provider == provider
+        if c.provider == provider:
+            found = True
+
+    if not found:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_err(f"No active config found for provider '{provider}'.", "NOT_FOUND"),
+        )
+
+    await db.commit()
+    return _ok({"default_provider": provider})
 
 
 async def _test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:

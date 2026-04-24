@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAuthStore } from "@/lib/stores/authStore";
 import { authApi } from "@/lib/api";
 
@@ -83,23 +83,35 @@ function AppInput({
 
 export default function ProfileSettingsPage() {
   const { user, setUser } = useAuthStore();
+  // Populate from authStore name on mount; re-sync when user changes
   const [name, setName] = useState(user?.name ?? "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Keep input in sync if authStore user changes (e.g. after initial hydration)
+  useEffect(() => {
+    setName(user?.name ?? "");
+  }, [user?.name]);
+
   const fileRef = useRef<HTMLInputElement>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(user?.avatarUrl ?? null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
 
-  const initials = name
-    .split(" ")
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase() || "SF";
+  // Keep avatar preview in sync with authStore
+  useEffect(() => {
+    if (user?.avatarUrl) setAvatarPreview(user.avatarUrl);
+  }, [user?.avatarUrl]);
+
+  const displayName = name.trim();
+  const initials = displayName
+    ? displayName.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
+    : (user?.email?.[0]?.toUpperCase() ?? "U");
 
   function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setAvatarFile(file);
     const url = URL.createObjectURL(file);
     setAvatarPreview(url);
     e.target.value = "";
@@ -107,26 +119,76 @@ export default function ProfileSettingsPage() {
 
   async function handleSave() {
     setSaving(true);
+    setSaveError(null);
     try {
-      const updated = await authApi.updateMe({ name });
+      // Build update payload
+      const payload: { full_name?: string; avatar_url?: string } = {};
+      if (name.trim() !== (user?.name ?? "")) payload.full_name = name.trim();
+
+      // TODO: upload avatarFile to Supabase Storage and get URL, then set avatar_url
+      // For now, skip avatar upload if no Supabase is configured
+      void avatarFile;
+
+      const updated = await authApi.updateMe(payload);
+      // Sync authStore — backend returns full_name, map to store's name field
       setUser({
         id: updated.id,
         email: updated.email,
-        name: updated.name,
-        plan: updated.plan,
-        avatarUrl: updated.avatar_url,
+        name: updated.full_name ?? "",
+        plan: updated.plan as "free" | "starter" | "pro" | "enterprise",
+        avatarUrl: updated.avatar_url ?? undefined,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
-    } catch {
-      // keep existing user data on error
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
     }
   }
 
+  // ── Password change state ────────────────────────────────────────────────────
+
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwSaved, setPwSaved] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+
+  async function handleChangePassword() {
+    setPwError(null);
+    if (newPassword.length < 8) {
+      setPwError("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError("Passwords do not match.");
+      return;
+    }
+    setPwSaving(true);
+    try {
+      await authApi.changePassword(currentPassword, newPassword);
+      setPwSaved(true);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setTimeout(() => setPwSaved(false), 3000);
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "Password change failed.");
+    } finally {
+      setPwSaving(false);
+    }
+  }
+
+  // ── Delete account state ─────────────────────────────────────────────────────
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteInput, setDeleteInput] = useState("");
+
   return (
     <div className="max-w-[560px]">
+      {/* ── Profile section ────────────────────────────────────────────────── */}
       <SectionCard>
         <h2
           className="mb-5"
@@ -238,6 +300,15 @@ export default function ProfileSettingsPage() {
           </p>
         </div>
 
+        {saveError && (
+          <p
+            className="mb-3"
+            style={{ fontFamily: "system-ui", fontSize: "12px", color: "#cf2d56" }}
+          >
+            {saveError}
+          </p>
+        )}
+
         {/* Save */}
         <button
           onClick={handleSave}
@@ -259,7 +330,95 @@ export default function ProfileSettingsPage() {
         </button>
       </SectionCard>
 
-      {/* Danger zone */}
+      {/* ── Change password section ─────────────────────────────────────────── */}
+      <SectionCard>
+        <h2
+          className="mb-1"
+          style={{
+            fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
+            fontSize: "16px",
+            fontWeight: 400,
+            color: "#26251e",
+          }}
+        >
+          Change password
+        </h2>
+        <p
+          className="mb-5"
+          style={{
+            fontFamily: "system-ui",
+            fontSize: "13px",
+            color: "rgba(38,37,30,0.5)",
+            lineHeight: 1.5,
+          }}
+        >
+          Not available for accounts signed in with Google.
+        </p>
+
+        <div className="mb-4">
+          <FieldLabel>Current password</FieldLabel>
+          <AppInput
+            type="password"
+            value={currentPassword}
+            onChange={setCurrentPassword}
+            placeholder="Enter current password"
+          />
+        </div>
+        <div className="mb-4">
+          <FieldLabel>New password</FieldLabel>
+          <AppInput
+            type="password"
+            value={newPassword}
+            onChange={setNewPassword}
+            placeholder="At least 8 characters"
+          />
+        </div>
+        <div className="mb-5">
+          <FieldLabel>Confirm new password</FieldLabel>
+          <AppInput
+            type="password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            placeholder="Repeat new password"
+          />
+        </div>
+
+        {pwError && (
+          <p
+            className="mb-3"
+            style={{ fontFamily: "system-ui", fontSize: "12px", color: "#cf2d56" }}
+          >
+            {pwError}
+          </p>
+        )}
+
+        <button
+          onClick={handleChangePassword}
+          disabled={pwSaving || !currentPassword || !newPassword || !confirmPassword}
+          className="transition-opacity hover:opacity-90"
+          style={{
+            background:
+              pwSaving || !currentPassword || !newPassword || !confirmPassword
+                ? "rgba(38,37,30,0.2)"
+                : "#26251e",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "8px",
+            padding: "10px 20px",
+            fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
+            fontSize: "13px",
+            fontWeight: 400,
+            cursor:
+              pwSaving || !currentPassword || !newPassword || !confirmPassword
+                ? "not-allowed"
+                : "pointer",
+          }}
+        >
+          {pwSaving ? "Updating…" : pwSaved ? "Password updated ✓" : "Update password"}
+        </button>
+      </SectionCard>
+
+      {/* ── Danger zone ─────────────────────────────────────────────────────── */}
       <SectionCard>
         <h2
           className="mb-1"
@@ -296,6 +455,8 @@ export default function ProfileSettingsPage() {
               Are you sure? Type DELETE to confirm.
             </p>
             <input
+              value={deleteInput}
+              onChange={(e) => setDeleteInput(e.target.value)}
               placeholder="DELETE"
               style={{
                 background: "transparent",
@@ -313,7 +474,7 @@ export default function ProfileSettingsPage() {
             />
             <div className="flex gap-2">
               <button
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={() => { setShowDeleteConfirm(false); setDeleteInput(""); }}
                 style={{
                   background: "#ebeae5",
                   border: "none",
@@ -328,15 +489,16 @@ export default function ProfileSettingsPage() {
                 Cancel
               </button>
               <button
+                disabled={deleteInput !== "DELETE"}
                 style={{
-                  background: "#cf2d56",
+                  background: deleteInput === "DELETE" ? "#cf2d56" : "rgba(207,45,86,0.3)",
                   border: "none",
                   borderRadius: "6px",
                   padding: "7px 14px",
                   fontFamily: "system-ui",
                   fontSize: "12px",
                   color: "#ffffff",
-                  cursor: "pointer",
+                  cursor: deleteInput === "DELETE" ? "pointer" : "not-allowed",
                 }}
               >
                 Delete my account
