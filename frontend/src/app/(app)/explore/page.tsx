@@ -1,56 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Database, Search, BarChart2, List, FileText, X } from "lucide-react";
 import UploadZone, { UploadButton, formatBytes } from "@/components/data/UploadZone";
 import DataTable from "@/components/data/DataTable";
 import ChartRenderer from "@/components/data/ChartRenderer";
 import ChatInput, { type ChatInputOptions } from "@/components/chat/ChatInput";
+import { datasetsApi, type DatasetSummary, type QueryResult } from "@/lib/api";
+import { toast } from "@/components/ui/Toast";
 
-// ── Mock datasets ─────────────────────────────────────────────────────────────
-
-interface MockDataset {
-  id: string;
-  name: string;
-  rowCount: number;
-  colCount: number;
-  sizeBytes: number;
-  format: string;
-  createdAt: string;
-}
-
-const MOCK_DATASETS: MockDataset[] = [
-  {
-    id: "d1",
-    name: "healthcare_patients_mumbai.csv",
-    rowCount: 10000,
-    colCount: 18,
-    sizeBytes: 2_400_000,
-    format: "csv",
-    createdAt: "2026-04-24",
-  },
-  {
-    id: "d2",
-    name: "banking_transactions_hdfc.parquet",
-    rowCount: 50000,
-    colCount: 22,
-    sizeBytes: 8_700_000,
-    format: "parquet",
-    createdAt: "2026-04-23",
-  },
-  {
-    id: "d3",
-    name: "retail_ecommerce_india.csv",
-    rowCount: 25000,
-    colCount: 15,
-    sizeBytes: 4_100_000,
-    format: "csv",
-    createdAt: "2026-04-22",
-  },
-];
+// Re-use the API type, add local alias for readability
+type Dataset = DatasetSummary;
 
 const TOTAL_STORAGE = 25 * 1024 * 1024 * 1024; // 25 GB
-const USED_STORAGE = MOCK_DATASETS.reduce((a, d) => a + d.sizeBytes, 0);
 
 // ── Mock preview data ─────────────────────────────────────────────────────────
 
@@ -110,7 +72,7 @@ function DatasetItem({
   active,
   onClick,
 }: {
-  ds: MockDataset;
+  ds: Dataset;
   active: boolean;
   onClick: () => void;
 }) {
@@ -149,7 +111,7 @@ function DatasetItem({
             color: "rgba(38,37,30,0.4)",
           }}
         >
-          {ds.rowCount.toLocaleString()} rows
+          {(ds.row_count ?? 0).toLocaleString()} rows
         </span>
         <span
           style={{
@@ -158,7 +120,7 @@ function DatasetItem({
             color: "rgba(38,37,30,0.35)",
           }}
         >
-          {formatBytes(ds.sizeBytes)}
+          {formatBytes(ds.size_bytes ?? 0)}
         </span>
       </div>
     </button>
@@ -173,12 +135,13 @@ function DatasetSidebar({
   onSelect,
   onUpload,
 }: {
-  datasets: MockDataset[];
+  datasets: Dataset[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onUpload: (file: File) => Promise<void>;
 }) {
-  const usedPct = (USED_STORAGE / TOTAL_STORAGE) * 100;
+  const usedBytes = datasets.reduce((a, d) => a + (d.size_bytes ?? 0), 0);
+  const usedPct = (usedBytes / TOTAL_STORAGE) * 100;
 
   return (
     <aside
@@ -238,7 +201,7 @@ function DatasetSidebar({
               color: "rgba(38,37,30,0.45)",
             }}
           >
-            {formatBytes(USED_STORAGE)} / 25 GB
+            {formatBytes(usedBytes)} / 25 GB
           </span>
         </div>
         <div
@@ -311,17 +274,31 @@ interface ChatMsg {
   content: string;
 }
 
-function ExploreChat({ datasetName }: { datasetName: string }) {
+function ExploreChat({ datasetId, datasetName }: { datasetId: string; datasetName: string }) {
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  const [querying, setQuerying] = useState(false);
 
-  function handleSend(content: string, _opts: ChatInputOptions) {
+  async function handleSend(content: string, _opts: ChatInputOptions) {
     const userMsg: ChatMsg = { id: crypto.randomUUID(), role: "user", content };
-    const asstMsg: ChatMsg = {
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content: `Analysing **${datasetName}**: ${content} — (Connect to backend for real analysis)`,
-    };
-    setMsgs((prev) => [...prev, userMsg, asstMsg]);
+    setMsgs((prev) => [...prev, userMsg]);
+    setQuerying(true);
+    try {
+      const result: QueryResult = await datasetsApi.query(datasetId, content);
+      const summary = result.summary ?? `${result.row_count} rows returned`;
+      const asstMsg: ChatMsg = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: summary,
+      };
+      setMsgs((prev) => [...prev, asstMsg]);
+    } catch {
+      setMsgs((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", content: "Could not run that query. Please try again." },
+      ]);
+    } finally {
+      setQuerying(false);
+    }
   }
 
   return (
@@ -363,7 +340,7 @@ function ExploreChat({ datasetName }: { datasetName: string }) {
         className="flex-shrink-0 p-4"
         style={{ borderTop: "1px solid rgba(38,37,30,0.08)" }}
       >
-        <ChatInput onSend={handleSend} placeholder={`Ask about ${datasetName}…`} />
+        <ChatInput onSend={handleSend} placeholder={querying ? "Querying…" : `Ask about ${datasetName}…`} disabled={querying} />
       </div>
     </div>
   );
@@ -372,26 +349,45 @@ function ExploreChat({ datasetName }: { datasetName: string }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ExplorePage() {
-  const [datasets, setDatasets] = useState<MockDataset[]>(MOCK_DATASETS);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("preview");
+  const [uploading, setUploading] = useState(false);
 
   const selected = datasets.find((d) => d.id === selectedId) ?? null;
 
+  // Load datasets on mount
+  useEffect(() => {
+    let cancelled = false;
+    datasetsApi.list().then((list) => {
+      if (!cancelled) setDatasets(list);
+    }).catch(() => {
+      // Silent — user can still upload
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   async function handleUpload(file: File): Promise<void> {
-    // Simulate upload
-    await new Promise((r) => setTimeout(r, 1200));
-    const newDs: MockDataset = {
-      id: crypto.randomUUID(),
-      name: file.name,
-      rowCount: Math.floor(Math.random() * 50000) + 1000,
-      colCount: Math.floor(Math.random() * 20) + 5,
-      sizeBytes: file.size,
-      format: file.name.split(".").pop() ?? "csv",
-      createdAt: new Date().toISOString().slice(0, 10),
-    };
-    setDatasets((prev) => [newDs, ...prev]);
-    setSelectedId(newDs.id);
+    setUploading(true);
+    try {
+      const result = await datasetsApi.upload(file);
+      const newDs: Dataset = {
+        id: result.id,
+        name: result.name,
+        row_count: result.row_count,
+        col_count: result.col_count,
+        size_bytes: result.size_bytes,
+        format: result.format,
+        created_at: result.created_at,
+      };
+      setDatasets((prev) => [newDs, ...prev]);
+      setSelectedId(newDs.id);
+      toast.success(`Uploaded "${file.name}" successfully`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -457,10 +453,10 @@ export default function ExplorePage() {
                 </p>
                 <div className="flex items-center gap-3 mt-0.5">
                   {[
-                    `${selected.rowCount.toLocaleString()} rows`,
-                    `${selected.colCount} cols`,
-                    formatBytes(selected.sizeBytes),
-                    selected.format.toUpperCase(),
+                    `${(selected.row_count ?? 0).toLocaleString()} rows`,
+                    `${selected.col_count ?? 0} cols`,
+                    formatBytes(selected.size_bytes ?? 0),
+                    (selected.format ?? "csv").toUpperCase(),
                   ].map((item, i) => (
                     <span
                       key={i}
@@ -495,7 +491,7 @@ export default function ExplorePage() {
             {/* Tab content */}
             <div className="flex-1 overflow-auto">
               {activeTab === "chat" && (
-                <ExploreChat datasetName={selected.name} />
+                <ExploreChat datasetId={selected.id} datasetName={selected.name} />
               )}
 
               {activeTab === "preview" && (

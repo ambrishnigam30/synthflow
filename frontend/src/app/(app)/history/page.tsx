@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Search, RefreshCw, X, ChevronDown, Zap, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { generateApi } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -100,7 +101,7 @@ const MOCK_HISTORY: HistoryRow[] = [
   },
 ];
 
-const ALL_DOMAINS = [...new Set(MOCK_HISTORY.map((r) => r.domain))].sort();
+// kept as fallback — shown if API call fails
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -385,13 +386,44 @@ function FilterPill({
 
 export default function HistoryPage() {
   const router = useRouter();
-  const [rows, setRows] = useState<HistoryRow[]>(MOCK_HISTORY);
+  const [rows, setRows] = useState<HistoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [domainFilter, setDomainFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<HistoryRow["status"] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await generateApi.list({ limit: 100 });
+        if (cancelled) return;
+        const mapped: HistoryRow[] = res.items.map((g) => ({
+          id: g.id,
+          prompt: g.prompt,
+          domain: g.domain ?? "General",
+          rows: g.row_count ?? 0,
+          cols: g.col_count ?? 0,
+          qualityScore: g.quality_score ?? 0,
+          status: (g.status === "done" ? "done" : g.status === "failed" ? "error" : "generating") as HistoryRow["status"],
+          date: g.created_at.slice(0, 10),
+          conversationId: g.conversation_id ?? "",
+        }));
+        setRows(mapped);
+      } catch {
+        setRows(MOCK_HISTORY); // fallback to mock on error
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, []);
+
+  const ALL_DOMAINS = useMemo(() => [...new Set(rows.map((r) => r.domain))].sort(), [rows]);
 
   const filtered = useMemo(() => {
     let list = rows;
@@ -439,6 +471,14 @@ export default function HistoryPage() {
 
   function handleOpenInChat(conversationId: string) {
     router.push(`/app/generate?conv=${conversationId}`);
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full" style={{ color: "rgba(38,37,30,0.4)", fontFamily: "system-ui", fontSize: "14px" }}>
+        Loading history…
+      </div>
+    );
   }
 
   return (

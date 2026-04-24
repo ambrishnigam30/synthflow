@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import { ToastProvider } from "@/components/ui/Toast";
 import "./globals.css";
 
 /* ── Marketing font (Stripe-inspired pages) ─────────────────────────────── */
@@ -45,7 +46,10 @@ export default function RootLayout({
         jetbrainsMono.variable,
       ].join(" ")}
     >
-      <body className="min-h-screen antialiased">{children}</body>
+      <body className="min-h-screen antialiased">
+        {children}
+        <ToastProvider />
+      </body>
     </html>
   );
 }
