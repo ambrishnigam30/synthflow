@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   Zap,
@@ -14,6 +14,13 @@ import {
   X,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/authStore";
+import { authApi, usageApi } from "@/lib/api";
+
+function fmtRows(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  return String(n);
+}
 
 // ── Nav item definition ──────────────────────────────────────────────────────
 
@@ -93,6 +100,21 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 // ── Plan badge ───────────────────────────────────────────────────────────────
 
 function PlanIndicator({ plan }: { plan: string }) {
+  const [used, setUsed] = useState(0);
+  const [limit, setLimit] = useState(plan === "free" ? 1000 : 1_000_000);
+
+  useEffect(() => {
+    usageApi.summary().then((s) => {
+      setUsed(s.rows_this_month);
+      setLimit(s.rows_limit);
+    }).catch(() => {
+      setUsed(0);
+      setLimit(plan === "free" ? 1000 : 1_000_000);
+    });
+  }, [plan]);
+
+  const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
+
   return (
     <div className="px-4 pb-4">
       <div
@@ -137,7 +159,7 @@ function PlanIndicator({ plan }: { plan: string }) {
             >
               <div
                 className="h-full rounded-full"
-                style={{ width: "34%", background: "#f54e00" }}
+                style={{ width: `${pct}%`, background: "#f54e00" }}
               />
             </div>
             <p
@@ -147,7 +169,7 @@ function PlanIndicator({ plan }: { plan: string }) {
                 color: "rgba(38,37,30,0.45)",
               }}
             >
-              340K / 1M rows used
+              {fmtRows(used)} / {fmtRows(limit)} rows used
             </p>
           </>
         )}
@@ -160,7 +182,7 @@ function PlanIndicator({ plan }: { plan: string }) {
 
 function UserRow({ onLogout }: { onLogout: () => void }) {
   const user = useAuthStore((s) => s.user);
-  const initials = user?.name
+  const initials = (user?.name || "U")
     .split(" ")
     .map((w) => w[0])
     .slice(0, 2)
@@ -335,6 +357,30 @@ function MobileTopBar({ onOpen }: { onOpen: () => void }) {
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { setUser } = useAuthStore();
+
+  // Hydrate the auth store from the API on first load.
+  // Login/signup redirect with window.location.href which doesn't populate Zustand,
+  // so we call /api/auth/me once to get the user object.
+  useEffect(() => {
+    if (useAuthStore.getState().user) return;
+    if (typeof window === "undefined") return;
+    const token =
+      localStorage.getItem("sf_access") ?? localStorage.getItem("sf_token");
+    if (!token) return;
+    authApi.getMe().then((apiUser) => {
+      setUser({
+        id: apiUser.id,
+        email: apiUser.email,
+        name: apiUser.name,
+        plan: apiUser.plan,
+        avatarUrl: apiUser.avatar_url,
+      });
+    }).catch(() => {
+      // 401 is auto-redirected to /login by api.ts
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "#f2f1ed" }}>

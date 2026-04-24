@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, ChevronDown } from "lucide-react";
+import Link from "next/link";
+import { Plus, ChevronDown, X } from "lucide-react";
 import ChatMessage, { StreamingBubble } from "@/components/chat/ChatMessage";
 import ChatInput, { type ChatInputOptions } from "@/components/chat/ChatInput";
 import PhaseProgress from "@/components/chat/PhaseProgress";
@@ -12,6 +13,7 @@ import {
   useGenerationStore,
   type GenerationResult,
 } from "@/lib/stores/generationStore";
+import { llmConfigApi } from "@/lib/api";
 import { SynthFlowWS } from "@/lib/ws";
 import type { WsGenerationDone } from "@/lib/ws";
 
@@ -372,6 +374,108 @@ function ChatThread({
   );
 }
 
+// ── No-provider modal ─────────────────────────────────────────────────────────
+
+function NoProviderModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ background: "rgba(38,37,30,0.4)" }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-[8px] p-6 relative"
+        style={{
+          background: "#ffffff",
+          border: "1px solid rgba(38,37,30,0.1)",
+          boxShadow: "rgba(0,0,0,0.14) 0px 28px 70px, rgba(0,0,0,0.1) 0px 14px 32px",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          style={{
+            position: "absolute",
+            top: "16px",
+            right: "16px",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "rgba(38,37,30,0.4)",
+          }}
+        >
+          <X size={16} strokeWidth={1.5} />
+        </button>
+
+        <div
+          className="w-10 h-10 rounded-[8px] flex items-center justify-center mb-4"
+          style={{ background: "rgba(245,78,0,0.1)" }}
+        >
+          <span style={{ fontSize: "20px" }}>🔑</span>
+        </div>
+
+        <h3
+          className="mb-2"
+          style={{
+            fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
+            fontSize: "18px",
+            fontWeight: 400,
+            color: "#26251e",
+            letterSpacing: "-0.18px",
+          }}
+        >
+          Connect an AI provider first
+        </h3>
+        <p
+          className="mb-6"
+          style={{
+            fontFamily: "system-ui",
+            fontSize: "14px",
+            color: "rgba(38,37,30,0.55)",
+            lineHeight: 1.5,
+          }}
+        >
+          To generate data, you need to connect an AI provider. Add your Gemini,
+          OpenAI, or Groq API key in Settings.
+        </p>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            style={{
+              background: "#ebeae5",
+              border: "none",
+              borderRadius: "8px",
+              padding: "9px 16px",
+              fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
+              fontSize: "13px",
+              color: "#26251e",
+              cursor: "pointer",
+            }}
+          >
+            Dismiss
+          </button>
+          <Link
+            href="/app/settings/providers"
+            style={{
+              display: "inline-block",
+              background: "#f54e00",
+              borderRadius: "8px",
+              padding: "9px 16px",
+              fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
+              fontSize: "13px",
+              color: "#ffffff",
+              textDecoration: "none",
+            }}
+          >
+            Go to Settings → LLM Providers
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Inner page (needs useSearchParams) ───────────────────────────────────────
 
 function GenerateInner() {
@@ -404,6 +508,18 @@ function GenerateInner() {
 
   const wsRef = useRef<SynthFlowWS | null>(null);
   const pendingGenIdRef = useRef<string | null>(null);
+
+  // LLM provider check
+  const [hasProvider, setHasProvider] = useState<boolean | null>(null);
+  const [showNoProviderModal, setShowNoProviderModal] = useState(false);
+
+  useEffect(() => {
+    llmConfigApi.list().then((configs) => {
+      setHasProvider(configs.length > 0);
+    }).catch(() => {
+      setHasProvider(false);
+    });
+  }, []);
 
   // On mount: connect WS for active conversation or pre-fill prompt
   useEffect(() => {
@@ -503,6 +619,12 @@ function GenerateInner() {
   }
 
   function handleSend(content: string, opts: ChatInputOptions) {
+    // Guard: require LLM provider
+    if (hasProvider === false) {
+      setShowNoProviderModal(true);
+      return;
+    }
+
     const convId = ensureConversation();
 
     // Add user message
@@ -520,7 +642,18 @@ function GenerateInner() {
 
     // Small delay to let WS open
     setTimeout(() => {
-      wsRef.current?.send({
+      if (!wsRef.current?.connected) {
+        // WS failed to connect — backend unreachable
+        addMessage({
+          id: newMsgId(),
+          role: "system",
+          content: "Could not reach the server. Please check your connection and try again.",
+          timestamp: new Date(),
+        });
+        setStreaming(false);
+        return;
+      }
+      wsRef.current.send({
         type: "message",
         content,
         conversation_id: convId,
@@ -531,7 +664,7 @@ function GenerateInner() {
           scenario: opts.scenario,
         },
       });
-    }, 100);
+    }, 300);
   }
 
   const hasMessages = messages.length > 0;
@@ -542,6 +675,10 @@ function GenerateInner() {
 
   return (
     <div className="flex h-full">
+      {showNoProviderModal && (
+        <NoProviderModal onClose={() => setShowNoProviderModal(false)} />
+      )}
+
       {/* Conversation sidebar */}
       <ConvSidebar onNewChat={handleNewChat} />
 

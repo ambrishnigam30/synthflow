@@ -2,12 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   BarChart2,
   Zap,
   Database,
   Clock,
   ChevronRight,
+  CheckCircle2,
+  Circle,
 } from "lucide-react";
 import {
   BarChart,
@@ -19,7 +22,15 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { useAuthStore } from "@/lib/stores/authStore";
-import { usageApi, generateApi, type UsageSummary, type GenerationSummary } from "@/lib/api";
+import { usageApi, generateApi, llmConfigApi, type UsageSummary, type GenerationSummary } from "@/lib/api";
+
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return "Good morning";
+  if (h >= 12 && h < 17) return "Good afternoon";
+  if (h >= 17 && h < 21) return "Good evening";
+  return "Hello";
+}
 
 // ── Fallback data (shown while loading or on API error) ──────────────────────
 
@@ -163,13 +174,17 @@ function UsageTooltip({
 
 // ── Quick-start input ─────────────────────────────────────────────────────────
 
-function QuickStart() {
+function QuickStart({ hasProvider }: { hasProvider: boolean | null }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!prompt.trim()) return;
+    if (hasProvider === false) {
+      router.push("/app/settings/providers");
+      return;
+    }
     router.push(`/app/generate?q=${encodeURIComponent(prompt.trim())}`);
   }
 
@@ -220,17 +235,88 @@ function QuickStart() {
   );
 }
 
+// ── Onboarding checklist ──────────────────────────────────────────────────────
+
+interface OnboardingState {
+  providerAdded: boolean;
+  generated: boolean;
+  explored: boolean;
+}
+
+interface ChecklistItemProps {
+  done: boolean;
+  label: string;
+  href: string;
+  linkLabel: string;
+}
+
+function ChecklistItem({ done, label, href, linkLabel }: ChecklistItemProps) {
+  return (
+    <div className="flex items-center gap-3">
+      {done ? (
+        <CheckCircle2 size={16} strokeWidth={1.5} style={{ color: "#1f8a65", flexShrink: 0 }} />
+      ) : (
+        <Circle size={16} strokeWidth={1.5} style={{ color: "rgba(38,37,30,0.3)", flexShrink: 0 }} />
+      )}
+      <span
+        style={{
+          fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
+          fontSize: "14px",
+          color: done ? "rgba(38,37,30,0.4)" : "#26251e",
+          textDecoration: done ? "line-through" : "none",
+          flex: 1,
+        }}
+      >
+        {label}
+      </span>
+      {!done && (
+        <Link
+          href={href}
+          style={{
+            fontFamily: "system-ui",
+            fontSize: "12px",
+            color: "#f54e00",
+            textDecoration: "none",
+          }}
+        >
+          {linkLabel} →
+        </Link>
+      )}
+    </div>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
-  const firstName = user?.name?.split(" ")[0] ?? "there";
+  const firstName = user?.name?.split(" ")[0] ?? "";
 
   const [usageData, setUsageData] = useState<{ month: string; rows: number }[]>(FALLBACK_USAGE);
   const [usageSummary, setUsageSummary] = useState<UsageSummary | null>(null);
   const [recentGens, setRecentGens] = useState<GenerationSummary[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+
+  // Onboarding checklist state
+  const [onboarding, setOnboarding] = useState<OnboardingState>({
+    providerAdded: false,
+    generated: false,
+    explored: false,
+  });
+  const [onboardingDismissed, setOnboardingDismissed] = useState(true); // default hidden until loaded
+
+  useEffect(() => {
+    const dismissed = localStorage.getItem("sf_onboarding_dismissed") === "true";
+    setOnboardingDismissed(dismissed);
+    if (!dismissed) {
+      llmConfigApi.list().then((configs) => {
+        setOnboarding((prev) => ({ ...prev, providerAdded: configs.length > 0 }));
+      }).catch(() => {});
+      const explored = localStorage.getItem("sf_visited_explore") === "true";
+      setOnboarding((prev) => ({ ...prev, explored }));
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -250,7 +336,13 @@ export default function DashboardPage() {
           setUsageData(mapped.length > 0 ? mapped : FALLBACK_USAGE);
         }
         if (summaryRes.status === "fulfilled") setUsageSummary(summaryRes.value);
-        if (gensRes.status === "fulfilled") setRecentGens(gensRes.value.items);
+        if (gensRes.status === "fulfilled") {
+          const items = gensRes.value.items;
+          setRecentGens(items);
+          if (items.length > 0) {
+            setOnboarding((prev) => ({ ...prev, generated: true }));
+          }
+        }
       } catch {
         // Silent — fallback data already shown
       } finally {
@@ -260,6 +352,16 @@ export default function DashboardPage() {
     void load();
     return () => { cancelled = true; };
   }, []);
+
+  // Auto-dismiss checklist when all items are complete
+  useEffect(() => {
+    if (!onboardingDismissed && onboarding.providerAdded && onboarding.generated && onboarding.explored) {
+      localStorage.setItem("sf_onboarding_dismissed", "true");
+      setOnboardingDismissed(true);
+    }
+  }, [onboarding, onboardingDismissed]);
+
+  const showOnboarding = !onboardingDismissed && !loadingData;
 
   return (
     <div className="p-6 max-w-[1200px] mx-auto">
@@ -275,7 +377,7 @@ export default function DashboardPage() {
             lineHeight: 1.25,
           }}
         >
-          Good morning, {firstName}
+          {getGreeting()}{firstName ? `, ${firstName}` : ""}
         </h1>
         <p
           className="mt-1"
@@ -289,6 +391,68 @@ export default function DashboardPage() {
           Your synthetic data platform is ready.
         </p>
       </div>
+
+      {/* Onboarding checklist */}
+      {showOnboarding && (
+        <div
+          className="rounded-[8px] p-5 mb-8"
+          style={{
+            background: "#ffffff",
+            border: "1px solid rgba(38,37,30,0.1)",
+          }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <p
+              style={{
+                fontFamily: "system-ui",
+                fontSize: "11px",
+                fontWeight: 600,
+                letterSpacing: "0.048px",
+                color: "rgba(38,37,30,0.45)",
+                textTransform: "uppercase",
+              }}
+            >
+              Getting started
+            </p>
+            <button
+              onClick={() => {
+                localStorage.setItem("sf_onboarding_dismissed", "true");
+                setOnboardingDismissed(true);
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                fontFamily: "system-ui",
+                fontSize: "12px",
+                color: "rgba(38,37,30,0.35)",
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+          <div className="space-y-3">
+            <ChecklistItem
+              done={onboarding.providerAdded}
+              label="Add an AI provider"
+              href="/app/settings/providers"
+              linkLabel="Go to Settings"
+            />
+            <ChecklistItem
+              done={onboarding.generated}
+              label="Generate your first dataset"
+              href="/app/generate"
+              linkLabel="Generate now"
+            />
+            <ChecklistItem
+              done={onboarding.explored}
+              label="Upload and explore data"
+              href="/app/explore"
+              linkLabel="Open Explorer"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Quick start */}
       <div
@@ -311,7 +475,7 @@ export default function DashboardPage() {
         >
           Quick Start
         </p>
-        <QuickStart />
+        <QuickStart hasProvider={onboarding.providerAdded} />
       </div>
 
       {/* Stat cards */}

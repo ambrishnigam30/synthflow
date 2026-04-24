@@ -358,6 +358,9 @@ export default function ExplorePage() {
 
   // Load datasets on mount
   useEffect(() => {
+    // Mark explore as visited for onboarding checklist
+    localStorage.setItem("sf_visited_explore", "true");
+
     let cancelled = false;
     datasetsApi.list().then((list) => {
       if (!cancelled) setDatasets(list);

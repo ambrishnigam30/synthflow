@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useAuthStore } from "@/lib/stores/authStore";
+import { authApi } from "@/lib/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -106,14 +107,22 @@ export default function ProfileSettingsPage() {
 
   async function handleSave() {
     setSaving(true);
-    // Simulate API call
-    await new Promise((r) => setTimeout(r, 800));
-    if (user) {
-      setUser({ ...user, name });
+    try {
+      const updated = await authApi.updateMe({ name });
+      setUser({
+        id: updated.id,
+        email: updated.email,
+        name: updated.name,
+        plan: updated.plan,
+        avatarUrl: updated.avatar_url,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch {
+      // keep existing user data on error
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
   }
 
   return (

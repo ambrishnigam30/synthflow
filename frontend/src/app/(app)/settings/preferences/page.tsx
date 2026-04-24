@@ -1,12 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
-type Theme = "system" | "light" | "dark";
 type DefaultFormat = "csv" | "json" | "parquet" | "excel";
 
 interface Preferences {
-  theme: Theme;
   defaultRowCount: number;
   defaultFormat: DefaultFormat;
   emailOnComplete: boolean;
@@ -15,60 +13,51 @@ interface Preferences {
   compactMode: boolean;
 }
 
-export default function PreferencesPage() {
-  const [prefs, setPrefs] = useState<Preferences>({
-    theme: "system",
+const STORAGE_KEY = "sf_preferences";
+
+function loadPrefs(): Preferences {
+  if (typeof window === "undefined") return defaultPrefs();
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return { ...defaultPrefs(), ...JSON.parse(raw) } as Preferences;
+  } catch {
+    // ignore
+  }
+  return defaultPrefs();
+}
+
+function defaultPrefs(): Preferences {
+  return {
     defaultRowCount: 5000,
     defaultFormat: "csv",
     emailOnComplete: false,
     emailOnError: true,
     showPhaseAnimations: true,
     compactMode: false,
-  });
+  };
+}
+
+export default function PreferencesPage() {
+  const [prefs, setPrefs] = useState<Preferences>(defaultPrefs);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setPrefs(loadPrefs());
+  }, []);
 
   function setP<K extends keyof Preferences>(key: K, val: Preferences[K]) {
     setPrefs((p) => ({ ...p, [key]: val }));
   }
 
-  async function handleSave() {
-    await new Promise((r) => setTimeout(r, 400));
+  function handleSave() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   }
 
   return (
     <div className="max-w-[520px] space-y-4">
-      {/* Appearance */}
-      <SectionCard title="Appearance">
-        <Field label="Theme">
-          <SegmentedControl
-            options={[
-              { value: "system", label: "System" },
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-            ]}
-            value={prefs.theme}
-            onChange={(v) => setP("theme", v as Theme)}
-          />
-        </Field>
-        <Field label="Compact mode">
-          <Toggle
-            value={prefs.compactMode}
-            onChange={(v) => setP("compactMode", v)}
-            label="Reduce spacing and font sizes"
-          />
-        </Field>
-        <Field label="Phase animations">
-          <Toggle
-            value={prefs.showPhaseAnimations}
-            onChange={(v) => setP("showPhaseAnimations", v)}
-            label="Show generation phase progress animations"
-          />
-        </Field>
-      </SectionCard>
-
-      {/* Defaults */}
+      {/* Generation defaults */}
       <SectionCard title="Generation defaults">
         <Field label="Default row count">
           <input
@@ -110,6 +99,24 @@ export default function PreferencesPage() {
               <option key={f} value={f}>{f.toUpperCase()}</option>
             ))}
           </select>
+        </Field>
+      </SectionCard>
+
+      {/* Display */}
+      <SectionCard title="Display">
+        <Field label="Compact mode">
+          <Toggle
+            value={prefs.compactMode}
+            onChange={(v) => setP("compactMode", v)}
+            label="Reduce spacing and font sizes"
+          />
+        </Field>
+        <Field label="Phase animations">
+          <Toggle
+            value={prefs.showPhaseAnimations}
+            onChange={(v) => setP("showPhaseAnimations", v)}
+            label="Show generation phase progress animations"
+          />
         </Field>
       </SectionCard>
 
@@ -247,46 +254,6 @@ function Toggle({
           }}
         />
       </button>
-    </div>
-  );
-}
-
-function SegmentedControl({
-  options,
-  value,
-  onChange,
-}: {
-  options: { value: string; label: string }[];
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div
-      className="flex rounded-[8px] overflow-hidden"
-      style={{ border: "1px solid rgba(38,37,30,0.12)", background: "#f7f7f4" }}
-    >
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          onClick={() => onChange(opt.value)}
-          style={{
-            padding: "6px 12px",
-            border: "none",
-            background: value === opt.value ? "#ffffff" : "transparent",
-            fontFamily: "system-ui",
-            fontSize: "12px",
-            color: value === opt.value ? "#26251e" : "rgba(38,37,30,0.5)",
-            cursor: "pointer",
-            fontWeight: value === opt.value ? 500 : 400,
-            boxShadow: value === opt.value ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
-            borderRadius: "6px",
-            margin: "2px",
-            transition: "all 150ms ease",
-          }}
-        >
-          {opt.label}
-        </button>
-      ))}
     </div>
   );
 }
