@@ -1,11 +1,16 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
+
+// ── Plan data ─────────────────────────────────────────────────────────────────
 
 const PLANS = [
   {
     id: "free",
     name: "Free",
-    price_usd: "$0",
-    price_inr: "₹0",
+    price_usd_monthly: 0,
+    price_inr_monthly: 0,
     period: "forever",
     cta: "Get started",
     ctaHref: "/signup",
@@ -25,8 +30,8 @@ const PLANS = [
   {
     id: "pro",
     name: "Pro",
-    price_usd: "$19",
-    price_inr: "₹499",
+    price_usd_monthly: 19,
+    price_inr_monthly: 499,
     period: "/ month",
     cta: "Start free trial",
     ctaHref: "/signup",
@@ -47,8 +52,8 @@ const PLANS = [
   {
     id: "business",
     name: "Business",
-    price_usd: "$49",
-    price_inr: "₹1,999",
+    price_usd_monthly: 49,
+    price_inr_monthly: 1999,
     period: "/ month",
     cta: "Start free trial",
     ctaHref: "/signup",
@@ -68,8 +73,8 @@ const PLANS = [
   {
     id: "enterprise",
     name: "Enterprise",
-    price_usd: "Custom",
-    price_inr: "Custom",
+    price_usd_monthly: null,
+    price_inr_monthly: null,
     period: "",
     cta: "Contact sales",
     ctaHref: "mailto:sales@synthflow.ai",
@@ -100,12 +105,6 @@ const ALL_FEATURES = [
   "CSV / JSON / Parquet export",
 ];
 
-function FeatureValue({ value }: { value: boolean | string }) {
-  if (value === true) return <span style={{ color: "#15be53" }}>✓</span>;
-  if (value === false) return <span style={{ color: "#64748d" }}>—</span>;
-  return <span>{value}</span>;
-}
-
 const FAQ = [
   {
     q: "Can I change plans later?",
@@ -117,7 +116,7 @@ const FAQ = [
   },
   {
     q: "What happens when I reach my generation limit?",
-    a: "You'll receive a warning at 80% usage. When the limit is reached, additional generations will be blocked until the next billing cycle or you upgrade.",
+    a: "You'll receive a warning at 80% usage. When the limit is reached, additional generations are blocked until the next billing cycle or you upgrade.",
   },
   {
     q: "Is the generated data really private?",
@@ -129,7 +128,27 @@ const FAQ = [
   },
 ];
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function FeatureValue({ value }: { value: boolean | string }) {
+  if (value === true) return <span style={{ color: "#15be53" }}>✓</span>;
+  if (value === false) return <span style={{ color: "#64748d" }}>—</span>;
+  return <span>{value}</span>;
+}
+
+function formatPrice(monthly: number | null, annual: boolean, currency: "usd" | "inr"): string {
+  if (monthly === null) return "Custom";
+  if (monthly === 0) return currency === "usd" ? "$0" : "₹0";
+  const effective = annual ? Math.round(monthly * 0.8) : monthly;
+  return currency === "usd" ? `$${effective}` : `₹${effective === monthly ? monthly : Math.round(monthly * 0.8 * 55)}`;
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────────
+
 export default function PricingPage() {
+  const [annual, setAnnual] = useState(false);
+  const [currency, setCurrency] = useState<"usd" | "inr">("usd");
+
   return (
     <div style={{ background: "#ffffff", fontFamily: '"Geist", system-ui, -apple-system, sans-serif', fontFeatureSettings: '"ss01"' }}>
 
@@ -141,59 +160,177 @@ export default function PricingPage() {
         <p style={{ fontSize: "18px", fontWeight: 300, color: "#64748d" }}>
           Start free. Pay only when you need more. No hidden fees.
         </p>
-        <div className="mt-4 flex items-center justify-center gap-2">
-          <span className="text-[12px] font-[400]" style={{ color: "#64748d" }}>USD</span>
-          <span className="text-[12px] font-[400]" style={{ color: "#064748d" }}>·</span>
-          <span className="text-[12px] font-[400]" style={{ color: "#64748d" }}>INR prices shown below</span>
+
+        {/* Toggles row */}
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+          {/* Monthly / Annual toggle */}
+          <div
+            className="flex items-center rounded-[6px] overflow-hidden"
+            style={{ border: "1px solid #e5edf5", background: "#f8fafc" }}
+          >
+            <button
+              onClick={() => setAnnual(false)}
+              style={{
+                padding: "7px 16px",
+                border: "none",
+                background: !annual ? "#ffffff" : "transparent",
+                fontFamily: '"Geist", system-ui, sans-serif',
+                fontSize: "13px",
+                fontWeight: 400,
+                color: !annual ? "#061b31" : "#64748d",
+                cursor: "pointer",
+                boxShadow: !annual ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                borderRadius: !annual ? "5px" : "0",
+                margin: !annual ? "2px" : "0",
+                transition: "all 150ms ease",
+              }}
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => setAnnual(true)}
+              style={{
+                padding: "7px 16px",
+                border: "none",
+                background: annual ? "#ffffff" : "transparent",
+                fontFamily: '"Geist", system-ui, sans-serif',
+                fontSize: "13px",
+                fontWeight: 400,
+                color: annual ? "#061b31" : "#64748d",
+                cursor: "pointer",
+                boxShadow: annual ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                borderRadius: annual ? "5px" : "0",
+                margin: annual ? "2px" : "0",
+                transition: "all 150ms ease",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              Annual
+              {annual && (
+                <span
+                  style={{
+                    background: "rgba(21,190,83,0.15)",
+                    color: "#108c3d",
+                    fontSize: "10px",
+                    fontWeight: 400,
+                    padding: "1px 5px",
+                    borderRadius: "3px",
+                  }}
+                >
+                  −20%
+                </span>
+              )}
+            </button>
+            {!annual && (
+              <span
+                style={{
+                  marginLeft: "4px",
+                  marginRight: "8px",
+                  background: "rgba(21,190,83,0.12)",
+                  color: "#108c3d",
+                  fontSize: "10px",
+                  fontWeight: 400,
+                  padding: "1px 5px",
+                  borderRadius: "3px",
+                }}
+              >
+                Save 20% annually
+              </span>
+            )}
+          </div>
+
+          {/* USD / INR toggle */}
+          <div
+            className="flex items-center rounded-[6px] overflow-hidden"
+            style={{ border: "1px solid #e5edf5", background: "#f8fafc" }}
+          >
+            {(["usd", "inr"] as const).map((c) => (
+              <button
+                key={c}
+                onClick={() => setCurrency(c)}
+                style={{
+                  padding: "7px 14px",
+                  border: "none",
+                  background: currency === c ? "#ffffff" : "transparent",
+                  fontFamily: '"Geist", system-ui, sans-serif',
+                  fontSize: "13px",
+                  fontWeight: 400,
+                  color: currency === c ? "#061b31" : "#64748d",
+                  cursor: "pointer",
+                  boxShadow: currency === c ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                  borderRadius: currency === c ? "5px" : "0",
+                  margin: currency === c ? "2px" : "0",
+                  transition: "all 150ms ease",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.4px",
+                }}
+              >
+                {c === "usd" ? "$ USD" : "₹ INR"}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
       {/* Plan cards */}
       <section className="pb-20 mx-auto max-w-[1080px] px-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {PLANS.map(plan => (
-            <div
-              key={plan.id}
-              className={`rounded-[6px] border p-6 flex flex-col ${plan.highlight ? "border-[#533afd]" : "border-[#e5edf5]"}`}
-              style={{
-                boxShadow: plan.highlight
-                  ? "rgba(83,58,253,0.2) 0px 20px 40px -20px, rgba(50,50,93,0.15) 0px 20px 40px -20px"
-                  : "rgba(50,50,93,0.1) 0px 20px 40px -25px",
-              }}
-            >
-              {(plan as typeof plan & { badge?: string }).badge && (
-                <div className="mb-3">
-                  <span className="text-[10px] font-[400] px-2 py-0.5 rounded-[4px] border border-[rgba(83,58,253,0.3)] bg-[rgba(83,58,253,0.06)]" style={{ color: "#533afd" }}>
-                    {(plan as typeof plan & { badge?: string }).badge}
-                  </span>
-                </div>
-              )}
-              <h2 className="mb-2" style={{ fontSize: "18px", fontWeight: 400, color: "#061b31" }}>{plan.name}</h2>
-              <div className="mb-1 flex items-baseline gap-1">
-                <span style={{ fontSize: "32px", fontWeight: 300, color: "#061b31", letterSpacing: "-0.64px" }}>
-                  {plan.price_usd}
-                </span>
-                {plan.period && <span style={{ fontSize: "14px", fontWeight: 300, color: "#64748d" }}>{plan.period}</span>}
-              </div>
-              {plan.price_inr !== "Custom" && (
-                <p className="mb-5 text-[12px] font-[300]" style={{ color: "#64748d" }}>
-                  {plan.price_inr}{plan.period}
-                </p>
-              )}
-              <div className="flex-1" />
-              <Link
-                href={plan.ctaHref}
-                className="mt-4 text-center text-[14px] font-[400] py-2 px-4 rounded-[4px] transition-colors block"
-                style={
-                  plan.highlight
-                    ? { background: "#533afd", color: "#fff" }
-                    : { background: "transparent", color: "#533afd", border: "1px solid #b9b9f9" }
-                }
+          {PLANS.map(plan => {
+            const price = formatPrice(
+              currency === "usd" ? plan.price_usd_monthly : plan.price_inr_monthly,
+              annual,
+              currency
+            );
+            return (
+              <div
+                key={plan.id}
+                className={`rounded-[6px] border p-6 flex flex-col ${plan.highlight ? "border-[#533afd]" : "border-[#e5edf5]"}`}
+                style={{
+                  boxShadow: plan.highlight
+                    ? "rgba(83,58,253,0.2) 0px 20px 40px -20px, rgba(50,50,93,0.15) 0px 20px 40px -20px"
+                    : "rgba(50,50,93,0.1) 0px 20px 40px -25px",
+                }}
               >
-                {plan.cta}
-              </Link>
-            </div>
-          ))}
+                {(plan as typeof plan & { badge?: string }).badge && (
+                  <div className="mb-3">
+                    <span className="text-[10px] font-[400] px-2 py-0.5 rounded-[4px] border border-[rgba(83,58,253,0.3)] bg-[rgba(83,58,253,0.06)]" style={{ color: "#533afd" }}>
+                      {(plan as typeof plan & { badge?: string }).badge}
+                    </span>
+                  </div>
+                )}
+                <h2 className="mb-2" style={{ fontSize: "18px", fontWeight: 400, color: "#061b31" }}>{plan.name}</h2>
+                <div className="mb-1 flex items-baseline gap-1">
+                  <span style={{ fontSize: "32px", fontWeight: 300, color: "#061b31", letterSpacing: "-0.64px" }}>
+                    {price}
+                  </span>
+                  {plan.period && price !== "Custom" && (
+                    <span style={{ fontSize: "14px", fontWeight: 300, color: "#64748d" }}>
+                      {annual && plan.price_usd_monthly ? "/ month, billed annually" : plan.period}
+                    </span>
+                  )}
+                </div>
+                {annual && plan.price_usd_monthly && plan.price_usd_monthly > 0 && (
+                  <p className="text-[12px] font-[300] mb-1" style={{ color: "#108c3d" }}>
+                    Save {currency === "usd" ? `$${plan.price_usd_monthly * 12 * 0.2}` : `₹${Math.round(plan.price_inr_monthly! * 12 * 0.2)}`}/year
+                  </p>
+                )}
+                <div className="flex-1" />
+                <Link
+                  href={plan.id === "pro" || plan.id === "business" ? "/app/settings/billing" : plan.ctaHref}
+                  className="mt-4 text-center text-[14px] font-[400] py-2 px-4 rounded-[4px] transition-colors block"
+                  style={
+                    plan.highlight
+                      ? { background: "#533afd", color: "#fff" }
+                      : { background: "transparent", color: "#533afd", border: "1px solid #b9b9f9" }
+                  }
+                >
+                  {plan.cta}
+                </Link>
+              </div>
+            );
+          })}
         </div>
       </section>
 
