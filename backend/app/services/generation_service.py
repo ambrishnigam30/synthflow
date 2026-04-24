@@ -18,8 +18,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.security import decrypt_api_key
 from app.core.storage import SupabaseStorageClient
 from app.models.generation import Generation
+from app.models.llm_config import LLMConfig
 from app.models.user import User
 from app.services.usage_service import UsageService
 
@@ -118,6 +120,28 @@ class GenerationService:
         self._db.add(gen)
         await self._db.commit()
 
+        # Fetch the user's active LLM config (provider + decrypted key)
+        llm_provider: str | None = None
+        llm_api_key: str | None = None
+        llm_model: str | None = None
+        try:
+            cfg_stmt = (
+                select(LLMConfig)
+                .where(LLMConfig.user_id == user.id, LLMConfig.is_active == True)  # noqa: E712
+                .limit(1)
+            )
+            cfg_result = await self._db.execute(cfg_stmt)
+            llm_cfg = cfg_result.scalar_one_or_none()
+            if llm_cfg is not None:
+                llm_provider = llm_cfg.provider
+                llm_model = llm_cfg.model_name
+                try:
+                    llm_api_key = decrypt_api_key(llm_cfg.encrypted_api_key)
+                except Exception as dec_exc:
+                    logger.warning("Failed to decrypt LLM API key for user %s: %s", user.id, dec_exc)
+        except Exception as cfg_exc:
+            logger.warning("Could not load LLM config for user %s: %s", user.id, cfg_exc)
+
         # Launch background task (non-blocking)
         asyncio.create_task(
             self._run_engine(
@@ -128,6 +152,9 @@ class GenerationService:
                 plan=user.plan,
                 options=opts,
                 phase_callback=phase_callback,
+                llm_provider=llm_provider,
+                llm_api_key=llm_api_key,
+                llm_model=llm_model,
             )
         )
 
@@ -144,6 +171,9 @@ class GenerationService:
         plan: str,
         options: dict[str, Any],
         phase_callback: PhaseCallback | None,
+        llm_provider: str | None = None,
+        llm_api_key: str | None = None,
+        llm_model: str | None = None,
     ) -> None:
         """
         Run the SynthFlow engine in a background task.
@@ -153,12 +183,14 @@ class GenerationService:
         if self._session_factory is not None:
             async with self._session_factory() as bg_db:
                 await self._execute_engine(
-                    bg_db, generation_id, session_id, prompt, user_id, plan, options, phase_callback
+                    bg_db, generation_id, session_id, prompt, user_id, plan, options,
+                    phase_callback, llm_provider, llm_api_key, llm_model,
                 )
         else:
             # Fallback: use the same session (test mode)
             await self._execute_engine(
-                self._db, generation_id, session_id, prompt, user_id, plan, options, phase_callback
+                self._db, generation_id, session_id, prompt, user_id, plan, options,
+                phase_callback, llm_provider, llm_api_key, llm_model,
             )
 
     async def _execute_engine(
@@ -171,6 +203,9 @@ class GenerationService:
         plan: str,
         options: dict[str, Any],
         phase_callback: PhaseCallback | None,
+        llm_provider: str | None = None,
+        llm_api_key: str | None = None,
+        llm_model: str | None = None,
     ) -> None:
         """Update DB as engine phases complete. Graceful fallback if engine unavailable."""
         try:
@@ -180,7 +215,8 @@ class GenerationService:
             try:
                 from synthflow.orchestrator import SynthFlowOrchestrator  # type: ignore[import]
                 await self._run_real_engine(
-                    db, generation_id, session_id, prompt, options, phase_callback
+                    db, generation_id, session_id, prompt, options, phase_callback,
+                    llm_provider, llm_api_key, llm_model,
                 )
                 return
             except ImportError:
@@ -222,6 +258,9 @@ class GenerationService:
         prompt: str,
         options: dict[str, Any],
         phase_callback: PhaseCallback | None,
+        llm_provider: str | None = None,
+        llm_api_key: str | None = None,
+        llm_model: str | None = None,
     ) -> None:
         """Run the actual SynthFlow engine (only when installed)."""
         from synthflow.orchestrator import SynthFlowOrchestrator  # type: ignore[import]
@@ -230,12 +269,20 @@ class GenerationService:
             if phase_callback:
                 phase_callback(phase, progress, message)
 
+        # Build engine kwargs — only pass provider/key if the user has configured one
+        engine_kwargs: dict[str, Any] = {
+            "prompt": prompt,
+            "seed": options.get("seed", 42),
+            "progress_callback": _phase_cb,
+        }
+        if llm_provider and llm_api_key:
+            engine_kwargs["provider"] = llm_provider
+            engine_kwargs["api_key"] = llm_api_key
+        if llm_model:
+            engine_kwargs["model"] = llm_model
+
         orchestrator = SynthFlowOrchestrator()
-        result = await orchestrator.run(
-            prompt=prompt,
-            seed=options.get("seed", 42),
-            progress_callback=_phase_cb,
-        )
+        result = await orchestrator.run(**engine_kwargs)
 
         code = getattr(result, "generated_code", "")
         quality = getattr(getattr(result, "quality_report", None), "overall_score", None)

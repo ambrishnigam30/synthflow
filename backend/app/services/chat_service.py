@@ -17,7 +17,9 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import decrypt_api_key
 from app.models.conversation import Message
+from app.models.llm_config import LLMConfig
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -97,19 +99,73 @@ class ChatService:
         await self._db.refresh(msg)
         return msg
 
+    # ── LLM config lookup ──────────────────────────────────────────────────
+
+    async def _get_llm_config(self, user_id: str) -> tuple[str | None, str | None, str | None]:
+        """Return (provider, decrypted_api_key, model) for the user's active LLM config."""
+        try:
+            stmt = (
+                select(LLMConfig)
+                .where(LLMConfig.user_id == user_id, LLMConfig.is_active == True)  # noqa: E712
+                .limit(1)
+            )
+            result = await self._db.execute(stmt)
+            cfg = result.scalar_one_or_none()
+            if cfg is None:
+                return None, None, None
+            api_key = decrypt_api_key(cfg.encrypted_api_key)
+            return cfg.provider, api_key, cfg.model_name
+        except Exception as exc:
+            logger.warning("Could not load LLM config: %s", exc)
+            return None, None, None
+
     # ── Conversational response (no generation) ────────────────────────────
 
     async def conversational_reply(
         self,
         message: str,
         history: list[dict[str, Any]],
+        user_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a conversational reply for non-generation messages.
-        Uses a simple template when no LLM is configured; real LLM used in production.
+        Uses the user's configured LLM provider when available;
+        falls back to a canned response for testing.
         """
-        # Placeholder: echo a canned response chunk-by-chunk for testing
-        # In production this calls the configured LLM provider.
+        # Try to use the real LLM engine if installed and configured
+        if user_id:
+            provider, api_key, model = await self._get_llm_config(user_id)
+            if provider and api_key:
+                try:
+                    from synthflow.llm_client import LLMClient  # type: ignore[import]
+                    client = LLMClient(
+                        provider=provider,
+                        api_key=api_key,
+                        model=model,
+                    )
+                    system_prompt = (
+                        "You are the SynthFlow AI assistant — an expert in synthetic data generation. "
+                        "Help users understand synthetic data, data quality, privacy, and statistics. "
+                        "When users ask for data generation, remind them to use the generate command."
+                    )
+                    # Build messages list including history
+                    messages = [{"role": m["role"], "content": m["content"]} for m in history[-8:]]
+                    messages.append({"role": "user", "content": message})
+                    response = await client.complete(
+                        prompt=message,
+                        system=system_prompt,
+                        messages=messages,
+                    )
+                    # Stream word-by-word
+                    for word in response.split():
+                        yield word + " "
+                    return
+                except ImportError:
+                    logger.debug("SynthFlow LLM client not available; using fallback reply.")
+                except Exception as llm_exc:
+                    logger.warning("LLM conversational reply failed: %s", llm_exc)
+
+        # Fallback: canned template response
         reply = (
             f"I understand you're asking about: {message[:80]}. "
             "I can help you generate synthetic data or answer questions about data science. "
@@ -138,6 +194,7 @@ class ChatService:
             "history": history,
             "conversation_id": conversation_id,
             "user_id": user.id,
+            # pass through so chat handler can call conversational_reply(user_id=...)
         }
 
         if intent == "modification":
