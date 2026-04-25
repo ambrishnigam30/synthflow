@@ -312,6 +312,7 @@ interface ChatThreadProps {
   isStreaming: boolean;
   streamingContent: string;
   activeGenerationId: string | null;
+  onRetry: (prompt: string) => void;
 }
 
 function ChatThread({
@@ -319,6 +320,7 @@ function ChatThread({
   isStreaming,
   streamingContent,
   activeGenerationId,
+  onRetry,
 }: ChatThreadProps) {
   const { generations } = useGenerationStore();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -338,7 +340,10 @@ function ChatThread({
 
         return (
           <div key={msg.id}>
-            <ChatMessage msg={msg} />
+            <ChatMessage
+              msg={msg}
+              onRetry={msg.isError && msg.retryPrompt ? () => onRetry(msg.retryPrompt!) : undefined}
+            />
             {gen && gen.status === "generating" && (
               <div className="mt-3 ml-0">
                 <PhaseProgress phases={gen.phases} progress={gen.progress} />
@@ -512,6 +517,8 @@ function GenerateInner() {
   const pendingSendRef = useRef<(() => void) | null>(null);
   // REST polling timer
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Track last sent prompt for retry
+  const lastSentPromptRef = useRef<string>("");
 
   // LLM provider check
   const [hasProvider, setHasProvider] = useState<boolean | null>(null);
@@ -645,8 +652,10 @@ function GenerateInner() {
         addMessage({
           id: newMsgId(),
           role: "system",
-          content: `Error: ${message}`,
+          content: message,
           timestamp: new Date(),
+          isError: true,
+          retryPrompt: lastSentPromptRef.current,
         });
         setStreaming(false);
         clearStreamingContent();
@@ -689,6 +698,7 @@ function GenerateInner() {
     }
 
     const convId = ensureConversation();
+    lastSentPromptRef.current = content;
 
     // Add user message to UI
     addMessage({
@@ -776,6 +786,7 @@ function GenerateInner() {
             isStreaming={isStreaming}
             streamingContent={streamingContent}
             activeGenerationId={activeGenerationId}
+            onRetry={(prompt) => handleSend(prompt, {})}
           />
         ) : (
           <EmptyState onExample={(p) => handleSend(p, {})} />

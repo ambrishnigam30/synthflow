@@ -42,8 +42,20 @@ def _knowledge() -> CausalKnowledgeBundle:
     return CausalKnowledgeBundle(domain="healthcare")
 
 
+_VALID_GENERATE_SCRIPT = (
+    "import numpy as np\n"
+    "import pandas as pd\n"
+    "\n"
+    "def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+    "    rng = np.random.default_rng(seed)\n"
+    "    return pd.DataFrame({'id': range(row_count), 'value': rng.normal(size=row_count)})\n"
+)
+
+
 def _synth() -> GlassBoxCodeSynthesizer:
-    return GlassBoxCodeSynthesizer(MockLLMClient())
+    client = MockLLMClient()
+    client.set_response("Glass Box", _VALID_GENERATE_SCRIPT)
+    return GlassBoxCodeSynthesizer(client)
 
 
 # ── E-008-01: Generates valid Python ─────────────────────────────────────
@@ -76,71 +88,40 @@ async def test_code_synthesizer_has_generate_function() -> None:
     assert "def generate" in code
 
 
-# ── E-008-03: Fallback script has no domain-specific Faker calls ──────────
+# ── E-008-03: LLM failure raises RuntimeError (no garbage fallback) ──────────
 
 @pytest.mark.asyncio
-async def test_code_synthesizer_fallback_no_faker() -> None:
-    """Fallback script (used when LLM returns garbage) has no Faker usage."""
+async def test_code_synthesizer_llm_failure_raises() -> None:
+    """When LLM returns a response without def generate, RuntimeError is raised."""
+    from synthflow.llm_client import MockLLMClient
+    client = MockLLMClient()
+    client.set_response("Glass Box", '{"not": "python code"}')
+    synth = GlassBoxCodeSynthesizer(client)
+    with pytest.raises(RuntimeError, match="Code synthesis failed"):
+        await synth.synthesize(
+            _minimal_schema(), _knowledge(),
+            DistributionMap(), ConstraintSet(),
+            row_count=50, seed=42,
+        )
+
+
+# ── E-008-04: extract_python_code validates generate function ────────────
+
+def test_extract_python_code_rejects_missing_generate() -> None:
+    """_extract_python_code raises when output has no def generate."""
     synth = _synth()
-    code = synth._fallback_script("patients", [
-        {"name": "patient_id", "data_type": "uuid", "is_primary_key": True,
-         "enum_values": [], "min_value": None, "max_value": None},
-        {"name": "age", "data_type": "integer", "is_primary_key": False,
-         "enum_values": [], "min_value": 0, "max_value": 120},
-    ], 50, 42)
-    assert "Faker" not in code
-    assert "faker" not in code.lower()
+    with pytest.raises(RuntimeError, match="Code synthesis failed"):
+        synth._extract_python_code("x = 1")
 
 
-# ── E-008-04: Code embeds constants ───────────────────────────────────────
+# ── E-008-05: extract_python_code rejects syntax errors ──────────────────
 
-@pytest.mark.asyncio
-async def test_code_synthesizer_fallback_embeds_enum_constants() -> None:
-    """Fallback script embeds enum values as inline constants."""
+def test_extract_python_code_rejects_syntax_error() -> None:
+    """_extract_python_code raises on SyntaxError in generated code."""
     synth = _synth()
-    code = synth._fallback_script("patients", [
-        {"name": "patient_id", "data_type": "uuid", "is_primary_key": True,
-         "enum_values": [], "min_value": None, "max_value": None},
-        {"name": "status", "data_type": "string", "is_primary_key": False,
-         "enum_values": ["active", "inactive", "pending"],
-         "min_value": None, "max_value": None},
-    ], 50, 42)
-    assert "active" in code
-    assert "inactive" in code
-
-
-# ── E-008-05: Code is stateless — same seed → same output ─────────────────
-
-def test_code_synthesizer_fallback_script_is_stateless() -> None:
-    """Fallback script returns identical DataFrame for same seed."""
-    import importlib
-    import sys
-    import types
-    import uuid
-
-    synth = _synth()
-    code = synth._fallback_script("test_table", [
-        {"name": "record_id", "data_type": "uuid", "is_primary_key": True,
-         "enum_values": [], "min_value": None, "max_value": None},
-        {"name": "value", "data_type": "float", "is_primary_key": False,
-         "enum_values": [], "min_value": None, "max_value": None},
-    ], 10, 99)
-
-    # Execute twice and compare
-    mod1 = types.ModuleType("test_glass_1")
-    mod1.__dict__["uuid"] = uuid
-    exec(compile(code, "<test>", "exec"), mod1.__dict__)
-    df1 = mod1.__dict__["generate"](10, 99)
-
-    mod2 = types.ModuleType("test_glass_2")
-    mod2.__dict__["uuid"] = uuid
-    exec(compile(code, "<test>", "exec"), mod2.__dict__)
-    df2 = mod2.__dict__["generate"](10, 99)
-
-    # Numeric columns should be identical
-    numeric_cols = df1.select_dtypes(include="number").columns.tolist()
-    for col in numeric_cols:
-        assert list(df1[col]) == list(df2[col]), f"Column {col} not deterministic"
+    bad_code = "def generate(row_count: int, seed: int):\n    return !!invalid"
+    with pytest.raises(RuntimeError, match="Code synthesis failed"):
+        synth._extract_python_code(bad_code)
 
 
 # ── E-008-06: Uses base64 not triple-quotes in wrapper ────────────────────

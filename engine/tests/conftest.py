@@ -29,10 +29,32 @@ from synthflow.models.schemas import (
 )
 
 
+_MOCK_GLASS_BOX_SCRIPT = (
+    "import numpy as np\n"
+    "import pandas as pd\n"
+    "\n"
+    "def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+    "    rng = np.random.default_rng(seed)\n"
+    "    n = row_count\n"
+    "    return pd.DataFrame({\n"
+    "        'id': range(n),\n"
+    "        'name': [f'record_{i}' for i in range(n)],\n"
+    "        'value': rng.normal(size=n).tolist(),\n"
+    "        'category': rng.choice(['A', 'B', 'C'], size=n).tolist(),\n"
+    "    })\n"
+)
+
+
 @pytest.fixture
 def mock_llm_client() -> MockLLMClient:
-    """MockLLMClient — deterministic, zero API calls."""
-    return MockLLMClient()
+    """MockLLMClient — deterministic, zero API calls.
+
+    Pre-configured to return valid Python for Glass Box code synthesis
+    so the orchestrator pipeline tests don't raise OrchestrationError.
+    """
+    client = MockLLMClient()
+    client.set_response("Glass Box", _MOCK_GLASS_BOX_SCRIPT)
+    return client
 
 
 @pytest.fixture

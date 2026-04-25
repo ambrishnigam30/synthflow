@@ -272,15 +272,20 @@ class UniversalKnowledgeGraph:
             data = safe_json_loads(raw)
             return self._build_bundle(data, intent)
         except Exception as exc:
-            _LOG.warning("LLM knowledge activation failed: %s — using minimal bundle", exc)
-            return self._minimal_bundle(intent)
+            raise RuntimeError(
+                "Knowledge extraction failed: LLM provider returned an error. "
+                "Please wait 1-2 minutes and retry, or switch to a different provider."
+            ) from exc
 
     def _build_bundle(
         self, data: dict[str, Any], intent: IntentObject
     ) -> CausalKnowledgeBundle:
         """Build a CausalKnowledgeBundle from LLM response dict."""
         if not isinstance(data, dict):
-            return self._minimal_bundle(intent)
+            raise RuntimeError(
+                "Knowledge extraction failed: LLM provider returned an error. "
+                "Please wait 1-2 minutes and retry, or switch to a different provider."
+            )
 
         dag_rules: list[CausalDagRule] = []
         for r in data.get("dag_rules", []):
@@ -352,18 +357,6 @@ class UniversalKnowledgeGraph:
             dag_rules=dag_rules,
             correlations=correlations,
             dirty_data_profile=dirty or DirtyDataProfile(),
-            currency_code=currency,
-        )
-
-    def _minimal_bundle(self, intent: IntentObject) -> CausalKnowledgeBundle:
-        """Return a minimal valid CausalKnowledgeBundle when LLM fails."""
-        currency = "INR" if (intent.region and intent.region.country == "India") else "USD"
-        return CausalKnowledgeBundle(
-            domain=intent.domain,
-            sub_domain=intent.sub_domain,
-            region=intent.region,
-            temporal_patterns=TemporalPatterns(),
-            dirty_data_profile=DirtyDataProfile(),
             currency_code=currency,
         )
 

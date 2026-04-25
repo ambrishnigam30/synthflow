@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64
 import textwrap
-from typing import Any, Optional, Union
+from typing import Union
 
 from synthflow.llm_client import LLMClient, MockLLMClient
 from synthflow.models.schemas import (
@@ -20,9 +20,6 @@ from synthflow.models.schemas import (
     SchemaDefinition,
 )
 from synthflow.utils.helpers import safe_json_loads
-from synthflow.utils.logger import get_logger
-
-_LOG = get_logger("code_synthesizer", component="code_synthesizer")
 
 _SYNTHESIZER_SYSTEM_PROMPT = (
     "You are SynthFlow's Glass Box code generator. Generate a standalone Python script that "
@@ -88,7 +85,10 @@ class GlassBoxCodeSynthesizer:
         """
         table = schema.tables[0] if schema.tables else None
         if table is None:
-            return self._minimal_script(row_count, seed)
+            raise RuntimeError(
+                "Code synthesis failed: LLM provider returned an error. "
+                "Please wait 1-2 minutes and retry, or switch to a different provider."
+            )
 
         columns_info = [
             {"name": c.name, "data_type": c.data_type,
@@ -127,20 +127,16 @@ class GlassBoxCodeSynthesizer:
                 temperature=0.2,
                 max_tokens=4096,
             )
-            code = self._extract_python_code(raw, table.name, columns_info, row_count, seed)
-            return code
+            return self._extract_python_code(raw)
+        except RuntimeError:
+            raise
         except Exception as exc:
-            _LOG.warning("LLM code synthesis failed: %s — using fallback script", exc)
-            return self._fallback_script(table.name, columns_info, row_count, seed)
+            raise RuntimeError(
+                "Code synthesis failed: LLM provider returned an error. "
+                "Please wait 1-2 minutes and retry, or switch to a different provider."
+            ) from exc
 
-    def _extract_python_code(
-        self,
-        raw: str,
-        table_name: str,
-        columns_info: list[dict[str, Any]],
-        row_count: int,
-        seed: int,
-    ) -> str:
+    def _extract_python_code(self, raw: str) -> str:
         """Extract Python code from LLM response, clean markdown, validate."""
         # Strip markdown fences
         import re
@@ -149,93 +145,21 @@ class GlassBoxCodeSynthesizer:
 
         # Validate that it's Python with a generate function
         if "def generate" not in code:
-            _LOG.warning("LLM output missing generate() function — using fallback")
-            return self._fallback_script(table_name, columns_info, row_count, seed)
+            raise RuntimeError(
+                "Code synthesis failed: LLM provider returned an error. "
+                "Please wait 1-2 minutes and retry, or switch to a different provider."
+            )
 
         # Validate compiles
         try:
             compile(code, "<glass_box>", "exec")
         except SyntaxError as exc:
-            _LOG.warning("Generated code has SyntaxError: %s — using fallback", exc)
-            return self._fallback_script(table_name, columns_info, row_count, seed)
+            raise RuntimeError(
+                "Code synthesis failed: LLM provider returned an error. "
+                "Please wait 1-2 minutes and retry, or switch to a different provider."
+            ) from exc
 
         return code
-
-    def _fallback_script(
-        self,
-        table_name: str,
-        columns_info: list[dict[str, Any]],
-        row_count: int,
-        seed: int,
-    ) -> str:
-        """Generate a working fallback script when LLM fails."""
-        col_defs: list[str] = []
-        for col in columns_info:
-            name = col["name"]
-            dtype = col.get("data_type", "string")
-            enum_vals = col.get("enum_values", [])
-            is_pk = col.get("is_primary_key", False)
-
-            if is_pk:
-                col_defs.append(f'        "{name}": [str(uuid.uuid4()) for _ in range(n)],')
-            elif enum_vals and isinstance(enum_vals, list) and len(enum_vals) > 0:
-                safe_vals = [repr(v) for v in enum_vals[:20]]
-                vals_str = "[" + ", ".join(safe_vals) + "]"
-                col_defs.append(
-                    f'        "{name}": rng.choice({vals_str}, size=n).tolist(),'
-                )
-            elif dtype == "integer":
-                col_defs.append(f'        "{name}": rng.integers(1, 1000, size=n).tolist(),')
-            elif dtype == "float":
-                col_defs.append(f'        "{name}": rng.normal(loc=50.0, scale=15.0, size=n).tolist(),')
-            elif dtype == "boolean":
-                col_defs.append(f'        "{name}": rng.integers(0, 2, size=n).astype(bool).tolist(),')
-            elif dtype in ("datetime", "date"):
-                col_defs.append(
-                    f'        "{name}": pd.date_range("2020-01-01", periods=n, freq="D").tolist(),'
-                )
-            else:
-                col_defs.append(f'        "{name}": [f"{name}_{{i}}" for i in range(n)],')
-
-        col_block = "\n".join(col_defs) + "\n"
-
-        # Build via explicit concatenation to avoid textwrap.dedent/col_block indent issues
-        script = (
-            "import uuid\n"
-            "import numpy as np\n"
-            "import pandas as pd\n"
-            "from typing import Optional\n"
-            "\n"
-            "\n"
-            f"def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
-            '    """\n'
-            f"    Glass Box generated function for table: {table_name}\n"
-            "    Stateless \u2014 same seed always produces same DataFrame.\n"
-            '    """\n'
-            "    n = row_count\n"
-            "    rng = np.random.default_rng(seed)\n"
-            "    data = {\n"
-            + col_block
-            + "    }\n"
-            "    return pd.DataFrame(data)\n"
-        )
-        return script
-
-    def _minimal_script(self, row_count: int, seed: int) -> str:
-        """Absolute minimal fallback when schema is unavailable."""
-        return textwrap.dedent(f"""\
-            import numpy as np
-            import pandas as pd
-            from typing import Optional
-
-
-            def generate(row_count: int, seed: int) -> pd.DataFrame:
-                rng = np.random.default_rng(seed)
-                return pd.DataFrame({{
-                    "id": range(row_count),
-                    "value": rng.normal(size=row_count),
-                }})
-            """)
 
     def generate_subprocess_wrapper(
         self, script: str, row_count: int, output_path: str

@@ -137,7 +137,7 @@ class LLMClient:
 
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_chain(wait_fixed(5), wait_fixed(15), wait_fixed(30)),
+        wait=wait_chain(wait_fixed(10), wait_fixed(30), wait_fixed(60)),
         retry=retry_if_exception_type(_RETRYABLE),
         reraise=True,
     )

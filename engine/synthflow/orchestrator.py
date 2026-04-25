@@ -124,61 +124,29 @@ class SynthFlowOrchestrator:
         )
 
         # ── Phase 2: KNOWLEDGE ─────────────────────────────────────────────
-        await asyncio.sleep(2)  # Rate-limit guard between LLM phases
+        await asyncio.sleep(5)  # Rate-limit guard between LLM phases
         await _progress(2, 0.15, "Activating domain knowledge graph…")
         try:
             knowledge: CausalKnowledgeBundle = await c.knowledge_graph.activate(intent)
         except LLMConfigError:
             raise
         except Exception as exc:
-            _LOG.warning("Phase 2 (KNOWLEDGE) failed: %s — using minimal bundle", exc)
-            from synthflow.models.schemas import (
-                DirtyDataProfile,
-                TemporalPatterns,
-            )
-            knowledge = CausalKnowledgeBundle(
-                domain=intent.domain,
-                sub_domain=intent.sub_domain,
-                region=intent.region,
-                temporal_patterns=TemporalPatterns(),
-                dirty_data_profile=DirtyDataProfile(),
-            )
+            _LOG.error("Phase 2 (KNOWLEDGE) failed: %s", exc)
+            raise OrchestrationError(str(exc)) from exc
 
         # ── Phase 3: SCHEMA ────────────────────────────────────────────────
-        await asyncio.sleep(2)  # Rate-limit guard between LLM phases
+        await asyncio.sleep(5)  # Rate-limit guard between LLM phases
         await _progress(3, 0.25, "Designing table schema…")
         try:
             schema: SchemaDefinition = await c.schema_intelligence.architect(intent, knowledge)
         except LLMConfigError:
             raise
         except Exception as exc:
-            _LOG.warning("Phase 3 (SCHEMA) failed: %s — using fallback schema", exc)
-            # The SchemaIntelligenceLayer has its own internal fallback, but if
-            # the whole call threw we need a minimal schema here.
-            from synthflow.models.schemas import ColumnDefinition, SchemaTable
-            table_name = f"{intent.domain}_records"
-            schema = SchemaDefinition(tables=[
-                SchemaTable(
-                    name=table_name,
-                    columns=[
-                        ColumnDefinition(
-                            name=f"{table_name}_id",
-                            data_type="uuid",
-                            semantic_type="id",
-                            is_primary_key=True,
-                            unique=True,
-                            nullable=False,
-                        ),
-                        ColumnDefinition(name="name", data_type="string", semantic_type="name"),
-                        ColumnDefinition(name="created_at", data_type="datetime", semantic_type="timestamp"),
-                        ColumnDefinition(name="status", data_type="string",
-                                         enum_values=["active", "inactive", "pending"]),
-                    ],
-                )
-            ])
+            _LOG.error("Phase 3 (SCHEMA) failed: %s", exc)
+            raise OrchestrationError(str(exc)) from exc
 
         # ── Phase 4: CONSTRAINTS ───────────────────────────────────────────
-        await asyncio.sleep(2)  # Rate-limit guard between LLM phases
+        await asyncio.sleep(5)  # Rate-limit guard between LLM phases
         await _progress(4, 0.35, "Building constraint physics set…")
         try:
             constraints: ConstraintSet = await c.constraint_engine.build_constraint_set(
@@ -202,7 +170,7 @@ class SynthFlowOrchestrator:
             )
 
         # ── Phase 6: GENERATION ────────────────────────────────────────────
-        await asyncio.sleep(2)  # Rate-limit guard before code synthesis LLM call
+        await asyncio.sleep(5)  # Rate-limit guard before code synthesis LLM call
         await _progress(6, 0.60, "Synthesising data via Glass Box code…")
         df: pd.DataFrame = pd.DataFrame()
         generated_code: str = ""
@@ -228,19 +196,13 @@ class SynthFlowOrchestrator:
         except LLMConfigError:
             raise
         except SelfHealingFailureError as exc:
-            _LOG.warning("Phase 6 (GENERATION) self-healing exhausted: %s — building fallback DataFrame", exc)
-            df = self._fallback_dataframe(
-                schema=schema,
-                row_count=effective_row_count,
-                seed=effective_seed,
-            )
+            _LOG.error("Phase 6 (GENERATION) self-healing exhausted: %s", exc)
+            raise OrchestrationError(str(exc)) from exc
+        except OrchestrationError:
+            raise
         except Exception as exc:
-            _LOG.warning("Phase 6 (GENERATION) failed: %s — building fallback DataFrame", exc)
-            df = self._fallback_dataframe(
-                schema=schema,
-                row_count=effective_row_count,
-                seed=effective_seed,
-            )
+            _LOG.error("Phase 6 (GENERATION) failed: %s", exc)
+            raise OrchestrationError(str(exc)) from exc
 
         # ── Phase 7: PATTERNS ──────────────────────────────────────────────
         await _progress(7, 0.70, "Applying temporal patterns and autocorrelation…")
@@ -381,45 +343,3 @@ class SynthFlowOrchestrator:
         )
         return result
 
-    # ── Fallback DataFrame builder ─────────────────────────────────────────
-
-    def _fallback_dataframe(
-        self,
-        schema: SchemaDefinition,
-        row_count: int,
-        seed: int,
-    ) -> pd.DataFrame:
-        """
-        Build a minimal DataFrame using DeterministicRealismEngine.sample_column()
-        for each column in the schema when Glass Box execution fails.
-
-        Args:
-            schema:    SchemaDefinition with column definitions.
-            row_count: Number of rows to generate.
-            seed:      Random seed for reproducibility.
-
-        Returns:
-            pd.DataFrame with one column per schema column.
-        """
-        realism = self._c.realism_engine
-        data: dict[str, object] = {}
-
-        table = schema.tables[0] if schema.tables else None
-        if table is None:
-            return pd.DataFrame({"id": range(row_count), "value": range(row_count)})
-
-        for col in table.columns:
-            try:
-                values = realism.sample_column(
-                    column=col,
-                    n_rows=row_count,
-                    global_seed=seed,
-                    context={},
-                    dist_map=None,
-                )
-                data[col.name] = values
-            except Exception as col_exc:
-                _LOG.debug("Fallback sample_column failed for %s: %s", col.name, col_exc)
-                data[col.name] = [None] * row_count
-
-        return pd.DataFrame(data)

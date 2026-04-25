@@ -112,14 +112,19 @@ class SchemaIntelligenceLayer:
             data = safe_json_loads(raw)
             return self._parse_schema_response(data, intent)
         except Exception as exc:
-            _LOG.warning("LLM schema generation failed: %s — using fallback schema", exc)
-            return self._fallback_schema(intent)
+            raise RuntimeError(
+                "Schema design failed: LLM provider returned an error. "
+                "Please wait 1-2 minutes and retry, or switch to a different provider."
+            ) from exc
 
     def _parse_schema_response(
         self, data: dict[str, Any], intent: IntentObject
     ) -> SchemaDefinition:
         if not isinstance(data, dict):
-            return self._fallback_schema(intent)
+            raise RuntimeError(
+                "Schema design failed: LLM provider returned an error. "
+                "Please wait 1-2 minutes and retry, or switch to a different provider."
+            )
 
         table_name = str(data.get("table_name", intent.domain + "_records")).lower()
         raw_cols: list[dict[str, Any]] = data.get("columns", [])
@@ -237,21 +242,6 @@ class SchemaIntelligenceLayer:
             description=schema.description,
             relationships=schema.relationships,
         )
-
-    def _fallback_schema(self, intent: IntentObject) -> SchemaDefinition:
-        """Return a generic schema when the LLM completely fails."""
-        table_name = f"{intent.domain}_records"
-        base_cols = [
-            ColumnDefinition(name=f"{table_name}_id", data_type="uuid", semantic_type="id",
-                             is_primary_key=True, unique=True, nullable=False),
-            ColumnDefinition(name="name", data_type="string", semantic_type="name"),
-            ColumnDefinition(name="created_at", data_type="datetime", semantic_type="timestamp"),
-            ColumnDefinition(name="status", data_type="string",
-                             enum_values=["active", "inactive", "pending"]),
-        ]
-        filler = _make_filler_columns(len(base_cols), _MIN_COLUMNS, intent.domain)
-        table = SchemaTable(name=table_name, columns=base_cols + filler)
-        return SchemaDefinition(tables=[table])
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────

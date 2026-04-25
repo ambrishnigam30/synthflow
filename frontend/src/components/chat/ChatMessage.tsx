@@ -111,7 +111,59 @@ function AssistantMessage({ msg }: { msg: ChatMessageType }) {
 
 // ── System / progress message ─────────────────────────────────────────────────
 
-function SystemMessage({ msg }: { msg: ChatMessageType }) {
+function SystemMessage({
+  msg,
+  onRetry,
+}: {
+  msg: ChatMessageType;
+  onRetry?: () => void;
+}) {
+  if (msg.isError) {
+    return (
+      <div className="flex justify-center">
+        <div
+          className="px-4 py-3"
+          style={{
+            background: "rgba(207,45,86,0.06)",
+            border: "1px solid rgba(207,45,86,0.25)",
+            borderRadius: "8px",
+            fontFamily: "system-ui",
+            fontSize: "13px",
+            color: "#cf2d56",
+            maxWidth: "520px",
+            textAlign: "center",
+          }}
+        >
+          <div style={{ marginBottom: onRetry ? "10px" : "0" }}>{msg.content}</div>
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              style={{
+                background: "#cf2d56",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "6px",
+                padding: "6px 14px",
+                fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
+                fontSize: "12px",
+                fontWeight: 400,
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.opacity = "0.85";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.opacity = "1";
+              }}
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex justify-center">
       <div
@@ -171,8 +223,14 @@ export function StreamingBubble({ content }: { content: string }) {
 
 // ── ChatMessage (router) ──────────────────────────────────────────────────────
 
-export default function ChatMessage({ msg }: { msg: ChatMessageType }) {
+export default function ChatMessage({
+  msg,
+  onRetry,
+}: {
+  msg: ChatMessageType;
+  onRetry?: () => void;
+}) {
   if (msg.role === "user") return <UserMessage msg={msg} />;
-  if (msg.role === "system") return <SystemMessage msg={msg} />;
+  if (msg.role === "system") return <SystemMessage msg={msg} onRetry={onRetry} />;
   return <AssistantMessage msg={msg} />;
 }

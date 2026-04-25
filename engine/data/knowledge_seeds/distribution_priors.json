@@ -1,367 +1,521 @@
 {
-  "semantic_types": [
+  "priors": [
     {
       "semantic_type": "age",
-      "distribution": "normal",
-      "params": {"mean": 38, "std": 14, "min": 0, "max": 100},
-      "domain_overrides": {
-        "healthcare": {"mean": 52, "std": 18, "min": 1, "max": 100},
-        "education": {"mean": 22, "std": 8, "min": 5, "max": 80},
-        "human_resources": {"mean": 35, "std": 10, "min": 18, "max": 65},
-        "banking": {"mean": 42, "std": 15, "min": 18, "max": 90}
-      }
+      "distribution_type": "normal",
+      "params": {
+        "mean": 38,
+        "std": 14,
+        "min": 0,
+        "max": 100
+      },
+      "clip_min": 0,
+      "clip_max": 100
     },
     {
       "semantic_type": "salary",
-      "distribution": "lognormal",
-      "params": {"mean_log": 10.8, "std_log": 0.6, "min": 10000, "max": 10000000},
-      "domain_overrides": {
-        "technology": {"mean_log": 12.0, "std_log": 0.5},
-        "healthcare": {"mean_log": 11.5, "std_log": 0.7},
-        "education": {"mean_log": 10.6, "std_log": 0.4},
-        "manufacturing": {"mean_log": 10.4, "std_log": 0.5}
-      }
+      "distribution_type": "lognormal",
+      "params": {
+        "mean_log": 10.8,
+        "std_log": 0.6,
+        "min": 10000,
+        "max": 10000000
+      },
+      "clip_min": 10000,
+      "clip_max": 10000000
     },
     {
       "semantic_type": "transaction_amount",
-      "distribution": "lognormal",
-      "params": {"mean_log": 7.5, "std_log": 1.2, "min": 1, "max": 10000000},
-      "domain_overrides": {
-        "banking": {"mean_log": 9.0, "std_log": 1.5},
-        "retail": {"mean_log": 6.0, "std_log": 0.9},
-        "fintech": {"mean_log": 7.0, "std_log": 1.3},
-        "insurance": {"mean_log": 10.0, "std_log": 1.0}
-      }
+      "distribution_type": "lognormal",
+      "params": {
+        "mean_log": 7.5,
+        "std_log": 1.2,
+        "min": 1,
+        "max": 10000000
+      },
+      "clip_min": 1,
+      "clip_max": 10000000
     },
     {
       "semantic_type": "price",
-      "distribution": "lognormal",
-      "params": {"mean_log": 5.0, "std_log": 1.5, "min": 0.01, "max": 10000000},
-      "domain_overrides": {
-        "real_estate": {"mean_log": 14.0, "std_log": 1.0},
-        "retail": {"mean_log": 4.5, "std_log": 1.2},
-        "hospitality": {"mean_log": 7.5, "std_log": 0.8}
-      }
+      "distribution_type": "lognormal",
+      "params": {
+        "mean_log": 5.0,
+        "std_log": 1.5,
+        "min": 0.01,
+        "max": 10000000
+      },
+      "clip_min": 0.01,
+      "clip_max": 10000000
     },
     {
       "semantic_type": "percentage",
-      "distribution": "beta",
-      "params": {"alpha": 2.0, "beta": 2.0, "min": 0.0, "max": 100.0},
-      "domain_overrides": {
-        "attendance": {"alpha": 5.0, "beta": 1.5},
-        "discount": {"alpha": 1.5, "beta": 5.0},
-        "completion_rate": {"alpha": 4.0, "beta": 2.0}
-      }
+      "distribution_type": "beta",
+      "params": {
+        "alpha": 2.0,
+        "beta": 2.0,
+        "min": 0.0,
+        "max": 100.0
+      },
+      "clip_min": 0.0,
+      "clip_max": 100.0
     },
     {
       "semantic_type": "credit_score",
-      "distribution": "normal",
-      "params": {"mean": 680, "std": 90, "min": 300, "max": 900},
-      "domain_overrides": {
-        "banking": {"mean": 700, "std": 80},
-        "fintech": {"mean": 660, "std": 100}
-      }
+      "distribution_type": "normal",
+      "params": {
+        "mean": 680,
+        "std": 90,
+        "min": 300,
+        "max": 900
+      },
+      "clip_min": 300,
+      "clip_max": 900
     },
     {
       "semantic_type": "rating",
-      "distribution": "truncated_normal",
-      "params": {"mean": 4.1, "std": 0.7, "min": 1.0, "max": 5.0},
-      "domain_overrides": {
-        "hospitality": {"mean": 4.2, "std": 0.6},
-        "retail": {"mean": 4.0, "std": 0.8},
-        "healthcare": {"mean": 4.3, "std": 0.5}
-      }
+      "distribution_type": "truncated_normal",
+      "params": {
+        "mean": 4.1,
+        "std": 0.7,
+        "min": 1.0,
+        "max": 5.0
+      },
+      "clip_min": 1.0,
+      "clip_max": 5.0
     },
     {
       "semantic_type": "quantity",
-      "distribution": "poisson",
-      "params": {"lambda": 5, "min": 0, "max": 10000},
-      "domain_overrides": {
-        "retail": {"lambda": 3},
-        "manufacturing": {"lambda": 100},
-        "logistics": {"lambda": 50}
-      }
+      "distribution_type": "poisson",
+      "params": {
+        "lambda": 5,
+        "min": 0,
+        "max": 10000
+      },
+      "clip_min": 0,
+      "clip_max": 10000
     },
     {
       "semantic_type": "duration_days",
-      "distribution": "exponential",
-      "params": {"scale": 7.0, "min": 1, "max": 365},
-      "domain_overrides": {
-        "healthcare": {"scale": 4.0},
-        "hospitality": {"scale": 2.5},
-        "logistics": {"scale": 5.0},
-        "banking": {"scale": 30.0}
-      }
+      "distribution_type": "exponential",
+      "params": {
+        "scale": 7.0,
+        "min": 1,
+        "max": 365
+      },
+      "clip_min": 1,
+      "clip_max": 365
     },
     {
       "semantic_type": "weight_kg",
-      "distribution": "normal",
-      "params": {"mean": 70, "std": 15, "min": 0.5, "max": 500},
-      "domain_overrides": {
-        "healthcare": {"mean": 72, "std": 15},
-        "logistics": {"mean": 250, "std": 200, "min": 0.1, "max": 30000}
-      }
+      "distribution_type": "normal",
+      "params": {
+        "mean": 70,
+        "std": 15,
+        "min": 0.5,
+        "max": 500
+      },
+      "clip_min": 0.5,
+      "clip_max": 500
     },
     {
       "semantic_type": "height_cm",
-      "distribution": "normal",
-      "params": {"mean": 168, "std": 10, "min": 50, "max": 220},
-      "domain_overrides": {
-        "healthcare": {"mean": 170, "std": 10},
-        "sports": {"mean": 182, "std": 8}
-      }
+      "distribution_type": "normal",
+      "params": {
+        "mean": 168,
+        "std": 10,
+        "min": 50,
+        "max": 220
+      },
+      "clip_min": 50,
+      "clip_max": 220
     },
     {
       "semantic_type": "temperature_celsius",
-      "distribution": "normal",
-      "params": {"mean": 22, "std": 8, "min": -50, "max": 60},
-      "domain_overrides": {
-        "healthcare_body": {"mean": 37.0, "std": 0.5, "min": 34, "max": 42},
-        "agriculture": {"mean": 25, "std": 10},
-        "manufacturing": {"mean": 200, "std": 50, "min": -20, "max": 1500}
-      }
+      "distribution_type": "normal",
+      "params": {
+        "mean": 22,
+        "std": 8,
+        "min": -50,
+        "max": 60
+      },
+      "clip_min": -50,
+      "clip_max": 60
     },
     {
       "semantic_type": "distance_km",
-      "distribution": "lognormal",
-      "params": {"mean_log": 3.5, "std_log": 1.2, "min": 0.1, "max": 50000},
-      "domain_overrides": {
-        "logistics": {"mean_log": 5.0, "std_log": 1.0},
-        "real_estate": {"mean_log": 2.0, "std_log": 0.8}
-      }
+      "distribution_type": "lognormal",
+      "params": {
+        "mean_log": 3.5,
+        "std_log": 1.2,
+        "min": 0.1,
+        "max": 50000
+      },
+      "clip_min": 0.1,
+      "clip_max": 50000
     },
     {
       "semantic_type": "count",
-      "distribution": "poisson",
-      "params": {"lambda": 10, "min": 0, "max": 100000},
-      "domain_overrides": {
-        "retail_items": {"lambda": 5},
-        "healthcare_visits": {"lambda": 3},
-        "telecom_calls": {"lambda": 150}
-      }
+      "distribution_type": "poisson",
+      "params": {
+        "lambda": 10,
+        "min": 0,
+        "max": 100000
+      },
+      "clip_min": 0,
+      "clip_max": 100000
     },
     {
       "semantic_type": "boolean_flag",
-      "distribution": "bernoulli",
-      "params": {"p": 0.15},
-      "domain_overrides": {
-        "fraud_flag": {"p": 0.03},
-        "churn_flag": {"p": 0.12},
-        "default_flag": {"p": 0.05},
-        "active_flag": {"p": 0.85},
-        "premium_flag": {"p": 0.22}
-      }
+      "distribution_type": "bernoulli",
+      "params": {
+        "p": 0.15
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "email",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {},
-      "domain_options": {
-        "provider_weights": {
-          "gmail.com": 0.40, "yahoo.com": 0.15, "outlook.com": 0.12,
-          "hotmail.com": 0.08, "rediffmail.com": 0.05, "icloud.com": 0.07,
-          "company.com": 0.13
-        }
-      }
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "gender",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "Male": 0.49, "Female": 0.49, "Other": 0.01, "Not Specified": 0.01
-      }
+        "Male": 0.49,
+        "Female": 0.49,
+        "Other": 0.01,
+        "Not Specified": 0.01
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "employment_type",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "Full-Time": 0.65, "Part-Time": 0.12, "Contract": 0.13, "Intern": 0.05, "Freelance": 0.05
-      }
+        "Full-Time": 0.65,
+        "Part-Time": 0.12,
+        "Contract": 0.13,
+        "Intern": 0.05,
+        "Freelance": 0.05
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "payment_method",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "Credit Card": 0.30, "Debit Card": 0.25, "UPI": 0.20, "Net Banking": 0.10,
-        "Cash": 0.08, "Wallet": 0.05, "EMI": 0.02
+        "Credit Card": 0.3,
+        "Debit Card": 0.25,
+        "UPI": 0.2,
+        "Net Banking": 0.1,
+        "Cash": 0.08,
+        "Wallet": 0.05,
+        "EMI": 0.02
       },
-      "domain_overrides": {
-        "india": {"UPI": 0.38, "Cash": 0.18, "Credit Card": 0.15, "Debit Card": 0.18},
-        "us": {"Credit Card": 0.45, "Debit Card": 0.30, "Digital Wallet": 0.15, "Cash": 0.10}
-      }
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "blood_group",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "O+": 0.38, "A+": 0.32, "B+": 0.14, "AB+": 0.06,
-        "O-": 0.04, "A-": 0.03, "B-": 0.02, "AB-": 0.01
-      }
+        "O+": 0.38,
+        "A+": 0.32,
+        "B+": 0.14,
+        "AB+": 0.06,
+        "O-": 0.04,
+        "A-": 0.03,
+        "B-": 0.02,
+        "AB-": 0.01
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "marital_status",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "Married": 0.55, "Single": 0.35, "Divorced": 0.07, "Widowed": 0.03
-      }
+        "Married": 0.55,
+        "Single": 0.35,
+        "Divorced": 0.07,
+        "Widowed": 0.03
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "education_level",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "High School": 0.20, "Some College": 0.15, "Bachelor's": 0.35,
-        "Master's": 0.22, "PhD": 0.05, "Diploma": 0.03
-      }
+        "High School": 0.2,
+        "Some College": 0.15,
+        "Bachelor's": 0.35,
+        "Master's": 0.22,
+        "PhD": 0.05,
+        "Diploma": 0.03
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "delivery_status",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "Delivered": 0.82, "In Transit": 0.08, "Out for Delivery": 0.05,
-        "Pending": 0.03, "Returned": 0.015, "Failed": 0.005
-      }
+        "Delivered": 0.82,
+        "In Transit": 0.08,
+        "Out for Delivery": 0.05,
+        "Pending": 0.03,
+        "Returned": 0.015,
+        "Failed": 0.005
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "claim_status",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "Approved": 0.60, "Pending": 0.20, "Rejected": 0.12, "Under Review": 0.08
-      }
+        "Approved": 0.6,
+        "Pending": 0.2,
+        "Rejected": 0.12,
+        "Under Review": 0.08
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "loan_status",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "Active": 0.55, "Closed": 0.25, "Default": 0.05, "Restructured": 0.08, "Write-off": 0.03, "NPA": 0.04
-      }
+        "Active": 0.55,
+        "Closed": 0.25,
+        "Default": 0.05,
+        "Restructured": 0.08,
+        "Write-off": 0.03,
+        "NPA": 0.04
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "priority",
-      "distribution": "categorical",
-      "params": {"Low": 0.35, "Medium": 0.45, "High": 0.15, "Critical": 0.05}
+      "distribution_type": "categorical",
+      "params": {
+        "Low": 0.35,
+        "Medium": 0.45,
+        "High": 0.15,
+        "Critical": 0.05
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "account_type",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "Savings": 0.52, "Current": 0.20, "Salary": 0.15, "Fixed Deposit": 0.08, "Recurring Deposit": 0.05
-      }
+        "Savings": 0.52,
+        "Current": 0.2,
+        "Salary": 0.15,
+        "Fixed Deposit": 0.08,
+        "Recurring Deposit": 0.05
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "product_category",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "Electronics": 0.18, "Clothing": 0.16, "Food & Beverages": 0.20, "Home & Kitchen": 0.12,
-        "Health & Beauty": 0.10, "Books": 0.07, "Sports": 0.06, "Toys": 0.05, "Automotive": 0.04, "Other": 0.02
-      }
+        "Electronics": 0.18,
+        "Clothing": 0.16,
+        "Food & Beverages": 0.2,
+        "Home & Kitchen": 0.12,
+        "Health & Beauty": 0.1,
+        "Books": 0.07,
+        "Sports": 0.06,
+        "Toys": 0.05,
+        "Automotive": 0.04,
+        "Other": 0.02
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "complaint_category",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "Billing Issue": 0.28, "Service Quality": 0.22, "Delayed Delivery": 0.18,
-        "Product Defect": 0.15, "Customer Service": 0.10, "Other": 0.07
-      }
+        "Billing Issue": 0.28,
+        "Service Quality": 0.22,
+        "Delayed Delivery": 0.18,
+        "Product Defect": 0.15,
+        "Customer Service": 0.1,
+        "Other": 0.07
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "nps_score",
-      "distribution": "categorical",
+      "distribution_type": "categorical",
       "params": {
-        "0": 0.02, "1": 0.02, "2": 0.03, "3": 0.04, "4": 0.04,
-        "5": 0.08, "6": 0.08, "7": 0.12, "8": 0.17, "9": 0.20, "10": 0.20
-      }
+        "0": 0.02,
+        "1": 0.02,
+        "2": 0.03,
+        "3": 0.04,
+        "4": 0.04,
+        "5": 0.08,
+        "6": 0.08,
+        "7": 0.12,
+        "8": 0.17,
+        "9": 0.2,
+        "10": 0.2
+      },
+      "clip_min": null,
+      "clip_max": null
     },
     {
       "semantic_type": "experience_years",
-      "distribution": "exponential",
-      "params": {"scale": 7.0, "min": 0, "max": 45},
-      "domain_overrides": {
-        "technology": {"scale": 5.0},
-        "healthcare": {"scale": 9.0},
-        "government": {"scale": 12.0}
-      }
+      "distribution_type": "exponential",
+      "params": {
+        "scale": 7.0,
+        "min": 0,
+        "max": 45
+      },
+      "clip_min": 0,
+      "clip_max": 45
     },
     {
       "semantic_type": "latitude",
-      "distribution": "uniform",
-      "params": {"min": -90.0, "max": 90.0},
-      "domain_overrides": {
-        "india": {"min": 8.0, "max": 37.0},
-        "us": {"min": 24.0, "max": 49.0},
-        "europe": {"min": 35.0, "max": 71.0}
-      }
+      "distribution_type": "uniform",
+      "params": {
+        "min": -90.0,
+        "max": 90.0
+      },
+      "clip_min": -90.0,
+      "clip_max": 90.0
     },
     {
       "semantic_type": "longitude",
-      "distribution": "uniform",
-      "params": {"min": -180.0, "max": 180.0},
-      "domain_overrides": {
-        "india": {"min": 68.0, "max": 97.0},
-        "us": {"min": -125.0, "max": -66.0},
-        "europe": {"min": -10.0, "max": 40.0}
-      }
+      "distribution_type": "uniform",
+      "params": {
+        "min": -180.0,
+        "max": 180.0
+      },
+      "clip_min": -180.0,
+      "clip_max": 180.0
     },
     {
       "semantic_type": "response_time_ms",
-      "distribution": "lognormal",
-      "params": {"mean_log": 4.5, "std_log": 0.7, "min": 1, "max": 30000},
-      "domain_overrides": {
-        "fintech": {"mean_log": 4.0, "std_log": 0.8},
-        "api": {"mean_log": 3.5, "std_log": 0.6}
-      }
+      "distribution_type": "lognormal",
+      "params": {
+        "mean_log": 4.5,
+        "std_log": 0.7,
+        "min": 1,
+        "max": 30000
+      },
+      "clip_min": 1,
+      "clip_max": 30000
     },
     {
       "semantic_type": "data_usage_gb",
-      "distribution": "lognormal",
-      "params": {"mean_log": 1.2, "std_log": 0.8, "min": 0.001, "max": 1000},
-      "domain_overrides": {
-        "telecommunications": {"mean_log": 2.5, "std_log": 0.9}
-      }
+      "distribution_type": "lognormal",
+      "params": {
+        "mean_log": 1.2,
+        "std_log": 0.8,
+        "min": 0.001,
+        "max": 1000
+      },
+      "clip_min": 0.001,
+      "clip_max": 1000
     },
     {
       "semantic_type": "bmi",
-      "distribution": "normal",
-      "params": {"mean": 25.5, "std": 4.5, "min": 12.0, "max": 60.0}
+      "distribution_type": "normal",
+      "params": {
+        "mean": 25.5,
+        "std": 4.5,
+        "min": 12.0,
+        "max": 60.0
+      },
+      "clip_min": 12.0,
+      "clip_max": 60.0
     },
     {
       "semantic_type": "blood_pressure_systolic",
-      "distribution": "normal",
-      "params": {"mean": 122, "std": 15, "min": 70, "max": 200}
+      "distribution_type": "normal",
+      "params": {
+        "mean": 122,
+        "std": 15,
+        "min": 70,
+        "max": 200
+      },
+      "clip_min": 70,
+      "clip_max": 200
     },
     {
       "semantic_type": "blood_pressure_diastolic",
-      "distribution": "normal",
-      "params": {"mean": 78, "std": 10, "min": 40, "max": 130}
+      "distribution_type": "normal",
+      "params": {
+        "mean": 78,
+        "std": 10,
+        "min": 40,
+        "max": 130
+      },
+      "clip_min": 40,
+      "clip_max": 130
     },
     {
       "semantic_type": "heart_rate_bpm",
-      "distribution": "normal",
-      "params": {"mean": 75, "std": 12, "min": 40, "max": 180}
+      "distribution_type": "normal",
+      "params": {
+        "mean": 75,
+        "std": 12,
+        "min": 40,
+        "max": 180
+      },
+      "clip_min": 40,
+      "clip_max": 180
     },
     {
       "semantic_type": "glucose_mg_dl",
-      "distribution": "lognormal",
-      "params": {"mean_log": 4.7, "std_log": 0.2, "min": 50, "max": 500}
+      "distribution_type": "lognormal",
+      "params": {
+        "mean_log": 4.7,
+        "std_log": 0.2,
+        "min": 50,
+        "max": 500
+      },
+      "clip_min": 50,
+      "clip_max": 500
     },
     {
       "semantic_type": "income",
-      "distribution": "lognormal",
-      "params": {"mean_log": 10.5, "std_log": 0.8, "min": 0, "max": 100000000},
-      "domain_overrides": {
-        "india": {"mean_log": 10.0, "std_log": 0.9},
-        "us": {"mean_log": 11.2, "std_log": 0.7},
-        "europe": {"mean_log": 11.0, "std_log": 0.6}
-      }
+      "distribution_type": "lognormal",
+      "params": {
+        "mean_log": 10.5,
+        "std_log": 0.8,
+        "min": 0,
+        "max": 100000000
+      },
+      "clip_min": 0,
+      "clip_max": 100000000
     },
     {
       "semantic_type": "tenure_months",
-      "distribution": "exponential",
-      "params": {"scale": 36.0, "min": 1, "max": 600},
-      "domain_overrides": {
-        "banking": {"scale": 60.0},
-        "telecom": {"scale": 24.0},
-        "fintech": {"scale": 18.0}
-      }
+      "distribution_type": "exponential",
+      "params": {
+        "scale": 36.0,
+        "min": 1,
+        "max": 600
+      },
+      "clip_min": 1,
+      "clip_max": 600
     }
   ]
 }

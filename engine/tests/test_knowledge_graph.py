@@ -264,10 +264,12 @@ async def test_knowledge_graph_bundle_has_india_currency(
 
 
 @pytest.mark.asyncio
-async def test_knowledge_graph_minimal_bundle_fallback(minimal_seeds_dir: Path) -> None:
-    """_minimal_bundle always returns a valid CausalKnowledgeBundle."""
+async def test_knowledge_graph_llm_failure_raises(minimal_seeds_dir: Path) -> None:
+    """When LLM fails, activate() raises RuntimeError — no silent garbage fallback."""
+    from unittest.mock import AsyncMock
     kg = UniversalKnowledgeGraph(MockLLMClient(), seeds_dir=minimal_seeds_dir)
+    # Patch _llm.complete to raise a network error
+    kg._llm.complete = AsyncMock(side_effect=RuntimeError("rate limit"))
     intent = IntentObject(domain="agriculture", row_count=50)
-    bundle = kg._minimal_bundle(intent)
-    assert isinstance(bundle, CausalKnowledgeBundle)
-    assert bundle.domain == "agriculture"
+    with pytest.raises(RuntimeError):
+        await kg.activate(intent)
