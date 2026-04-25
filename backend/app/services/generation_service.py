@@ -16,6 +16,9 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+import numpy as np
+import pandas as pd
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -27,6 +30,26 @@ from app.models.user import User
 from app.services.usage_service import UsageService
 
 logger = logging.getLogger(__name__)
+
+
+def _make_json_safe(obj: Any) -> Any:
+    """Convert pandas/numpy types to JSON-serializable Python types."""
+    if isinstance(obj, (pd.Timestamp, datetime)):
+        return obj.isoformat()
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj) if not np.isnan(obj) else None
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    try:
+        if pd.isna(obj):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return obj
 
 # Plan row limits
 _PLAN_ROW_CAPS: dict[str, int] = {
@@ -366,7 +389,10 @@ class GenerationService:
         col_count: int = 0
         if df is not None and hasattr(df, "head"):
             try:
-                preview_rows = df.head(10).fillna("").to_dict(orient="records")
+                preview_df = df.head(10).copy()
+                for col in preview_df.columns:
+                    preview_df[col] = preview_df[col].apply(_make_json_safe)
+                preview_rows = preview_df.to_dict(orient="records")
                 col_count = len(df.columns)
             except Exception as df_exc:
                 logger.warning("Could not extract preview rows: %s", df_exc)

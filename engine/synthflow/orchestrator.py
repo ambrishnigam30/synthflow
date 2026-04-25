@@ -124,6 +124,7 @@ class SynthFlowOrchestrator:
         )
 
         # ── Phase 2: KNOWLEDGE ─────────────────────────────────────────────
+        await asyncio.sleep(2)  # Rate-limit guard between LLM phases
         await _progress(2, 0.15, "Activating domain knowledge graph…")
         try:
             knowledge: CausalKnowledgeBundle = await c.knowledge_graph.activate(intent)
@@ -144,6 +145,7 @@ class SynthFlowOrchestrator:
             )
 
         # ── Phase 3: SCHEMA ────────────────────────────────────────────────
+        await asyncio.sleep(2)  # Rate-limit guard between LLM phases
         await _progress(3, 0.25, "Designing table schema…")
         try:
             schema: SchemaDefinition = await c.schema_intelligence.architect(intent, knowledge)
@@ -176,6 +178,7 @@ class SynthFlowOrchestrator:
             ])
 
         # ── Phase 4: CONSTRAINTS ───────────────────────────────────────────
+        await asyncio.sleep(2)  # Rate-limit guard between LLM phases
         await _progress(4, 0.35, "Building constraint physics set…")
         try:
             constraints: ConstraintSet = await c.constraint_engine.build_constraint_set(
@@ -199,6 +202,7 @@ class SynthFlowOrchestrator:
             )
 
         # ── Phase 6: GENERATION ────────────────────────────────────────────
+        await asyncio.sleep(2)  # Rate-limit guard before code synthesis LLM call
         await _progress(6, 0.60, "Synthesising data via Glass Box code…")
         df: pd.DataFrame = pd.DataFrame()
         generated_code: str = ""

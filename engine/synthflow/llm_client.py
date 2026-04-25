@@ -13,7 +13,7 @@ import json
 from typing import Any, Optional
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_chain, wait_fixed
 
 from synthflow.utils.helpers import LLMParseError, safe_json_loads
 
@@ -137,7 +137,7 @@ class LLMClient:
 
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=8),
+        wait=wait_chain(wait_fixed(5), wait_fixed(15), wait_fixed(30)),
         retry=retry_if_exception_type(_RETRYABLE),
         reraise=True,
     )

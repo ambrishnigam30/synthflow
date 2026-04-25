@@ -1,0 +1,148 @@
+{
+  "domains": [
+    {
+      "domain": "healthcare",
+      "sub_domains": ["cardiology", "oncology", "neurology", "orthopedics", "pediatrics", "emergency", "radiology", "pharmacy", "mental_health", "general_practice"],
+      "typical_entities": ["patient", "doctor", "nurse", "hospital", "clinic", "prescription", "diagnosis", "treatment", "lab_result", "appointment"],
+      "typical_columns": ["patient_id", "name", "age", "gender", "blood_group", "diagnosis_code", "icd_code", "doctor_id", "admission_date", "discharge_date", "medication", "dosage", "insurance_provider", "insurance_id", "room_number", "ward", "treatment_cost"],
+      "key_metrics": ["readmission_rate", "avg_length_of_stay", "bed_occupancy_rate", "patient_satisfaction"],
+      "regulations": ["HIPAA", "GDPR", "ISO 13485"],
+      "typical_id_formats": {"patient_id": "PT-{6digits}", "doctor_id": "DR-{5digits}", "icd_code": "{letter}{2digits}.{2digits}"}
+    },
+    {
+      "domain": "banking",
+      "sub_domains": ["retail_banking", "corporate_banking", "investment_banking", "mortgage", "credit_cards", "insurance", "wealth_management", "microfinance"],
+      "typical_entities": ["customer", "account", "transaction", "loan", "branch", "employee", "card", "beneficiary"],
+      "typical_columns": ["account_number", "customer_id", "customer_name", "account_type", "balance", "transaction_id", "transaction_date", "transaction_type", "amount", "currency", "branch_code", "ifsc_code", "swift_code", "loan_id", "loan_amount", "interest_rate", "emi", "credit_score", "kyc_status"],
+      "key_metrics": ["npa_ratio", "casa_ratio", "net_interest_margin", "capital_adequacy_ratio"],
+      "regulations": ["Basel III", "KYC/AML", "GDPR", "PCI-DSS"],
+      "typical_id_formats": {"account_number": "{10-18digits}", "customer_id": "CUST{8digits}", "transaction_id": "TXN{12digits}"}
+    },
+    {
+      "domain": "retail",
+      "sub_domains": ["e_commerce", "grocery", "fashion", "electronics", "furniture", "pharmacy", "luxury", "food_beverage"],
+      "typical_entities": ["customer", "product", "order", "invoice", "supplier", "store", "employee", "category"],
+      "typical_columns": ["order_id", "customer_id", "product_id", "product_name", "category", "brand", "sku", "quantity", "unit_price", "total_amount", "discount_pct", "tax_amount", "order_date", "delivery_date", "payment_method", "delivery_status", "return_flag", "store_id", "channel"],
+      "key_metrics": ["gmv", "aov", "cac", "ltv", "nps", "return_rate", "inventory_turnover"],
+      "regulations": ["GDPR", "Consumer Protection Act", "GST compliance"],
+      "typical_id_formats": {"order_id": "ORD-{8digits}", "product_id": "PRD-{6digits}", "customer_id": "CUS{8digits}"}
+    },
+    {
+      "domain": "education",
+      "sub_domains": ["k12", "higher_education", "vocational", "online_learning", "corporate_training", "special_education"],
+      "typical_entities": ["student", "teacher", "course", "enrollment", "grade", "attendance", "institution", "exam"],
+      "typical_columns": ["student_id", "student_name", "date_of_birth", "gender", "grade_level", "enrollment_date", "course_id", "course_name", "teacher_id", "marks", "percentage", "grade", "attendance_pct", "institution_id", "roll_number", "board", "stream"],
+      "key_metrics": ["pass_rate", "dropout_rate", "avg_score", "attendance_rate", "placement_rate"],
+      "regulations": ["FERPA", "RTE Act", "GDPR"],
+      "typical_id_formats": {"student_id": "STU{8digits}", "roll_number": "{2digits}-{3letters}-{4digits}", "course_id": "CRS-{4digits}"}
+    },
+    {
+      "domain": "telecommunications",
+      "sub_domains": ["mobile", "broadband", "enterprise", "iot", "satellite", "cable_tv"],
+      "typical_entities": ["subscriber", "plan", "usage_record", "invoice", "complaint", "tower", "device"],
+      "typical_columns": ["subscriber_id", "phone_number", "plan_name", "plan_type", "data_used_gb", "calls_minutes", "sms_count", "monthly_charge", "activation_date", "last_recharge_date", "device_type", "imei", "network_type", "region", "churn_flag", "nps_score"],
+      "key_metrics": ["arpu", "churn_rate", "nps", "data_usage_per_subscriber", "network_uptime"],
+      "regulations": ["TRAI", "GDPR", "FCC regulations"],
+      "typical_id_formats": {"subscriber_id": "MOB{10digits}", "phone_number": "+91-{10digits}", "imei": "{15digits}"}
+    },
+    {
+      "domain": "human_resources",
+      "sub_domains": ["recruitment", "payroll", "performance", "training", "benefits", "employee_relations"],
+      "typical_entities": ["employee", "department", "job_position", "payroll_record", "leave_record", "performance_review", "training_program"],
+      "typical_columns": ["employee_id", "full_name", "date_of_birth", "gender", "department", "designation", "joining_date", "salary", "bonus", "total_compensation", "experience_years", "education", "manager_id", "location", "employment_type", "leave_balance", "performance_rating", "skills"],
+      "key_metrics": ["attrition_rate", "avg_tenure", "time_to_hire", "employee_nps", "salary_satisfaction"],
+      "regulations": ["Labor Laws", "GDPR", "Equal Employment Opportunity"],
+      "typical_id_formats": {"employee_id": "EMP{6digits}", "manager_id": "EMP{6digits}"}
+    },
+    {
+      "domain": "logistics",
+      "sub_domains": ["freight", "last_mile", "warehousing", "cold_chain", "customs", "fleet_management"],
+      "typical_entities": ["shipment", "vehicle", "driver", "warehouse", "customer", "order", "route"],
+      "typical_columns": ["shipment_id", "tracking_number", "origin", "destination", "weight_kg", "volume_cbm", "carrier", "vehicle_type", "driver_id", "dispatch_date", "expected_delivery", "actual_delivery", "delivery_status", "freight_cost", "distance_km", "delay_hours"],
+      "key_metrics": ["on_time_delivery_rate", "cost_per_km", "vehicle_utilization", "avg_delivery_time"],
+      "regulations": ["ADR", "IATA", "Customs regulations"],
+      "typical_id_formats": {"shipment_id": "SHP-{10digits}", "tracking_number": "{2letters}{8digits}{2letters}", "vehicle_id": "VEH-{6digits}"}
+    },
+    {
+      "domain": "insurance",
+      "sub_domains": ["life", "health", "motor", "property", "travel", "commercial", "crop"],
+      "typical_entities": ["policyholder", "policy", "claim", "agent", "premium", "beneficiary", "surveyor"],
+      "typical_columns": ["policy_number", "policyholder_id", "policyholder_name", "policy_type", "sum_assured", "premium_amount", "premium_frequency", "start_date", "end_date", "claim_id", "claim_date", "claim_amount", "claim_status", "agent_id", "nominee_name", "nominee_relation"],
+      "key_metrics": ["claims_ratio", "combined_ratio", "retention_rate", "lapse_rate"],
+      "regulations": ["IRDAI", "Solvency II", "GDPR"],
+      "typical_id_formats": {"policy_number": "POL-{10digits}", "claim_id": "CLM-{8digits}", "agent_id": "AGT-{6digits}"}
+    },
+    {
+      "domain": "real_estate",
+      "sub_domains": ["residential", "commercial", "industrial", "hospitality", "retail_spaces", "land"],
+      "typical_entities": ["property", "owner", "tenant", "agent", "transaction", "lease", "valuation"],
+      "typical_columns": ["property_id", "property_type", "address", "city", "state", "area_sqft", "bedrooms", "bathrooms", "floor", "building_age_years", "amenities", "listing_price", "sale_price", "rent_per_month", "listing_date", "sale_date", "owner_id", "agent_id", "furnishing_status"],
+      "key_metrics": ["price_per_sqft", "cap_rate", "vacancy_rate", "rental_yield"],
+      "regulations": ["RERA", "GDPR", "Local zoning laws"],
+      "typical_id_formats": {"property_id": "PROP-{8digits}", "owner_id": "OWN-{6digits}"}
+    },
+    {
+      "domain": "manufacturing",
+      "sub_domains": ["automotive", "electronics", "pharmaceuticals", "food_processing", "textiles", "chemicals", "aerospace"],
+      "typical_entities": ["product", "batch", "machine", "worker", "raw_material", "quality_inspection", "supplier"],
+      "typical_columns": ["batch_id", "product_code", "product_name", "production_date", "quantity_produced", "defect_count", "machine_id", "worker_id", "raw_material_id", "material_used_kg", "cycle_time_minutes", "oee_pct", "quality_score", "rejection_rate", "line_id"],
+      "key_metrics": ["oee", "defect_rate", "throughput", "downtime_pct", "yield_rate"],
+      "regulations": ["ISO 9001", "GMP", "FDA", "OSHA"],
+      "typical_id_formats": {"batch_id": "BTH-{8digits}", "product_code": "{3letters}-{4digits}", "machine_id": "MCH-{4digits}"}
+    },
+    {
+      "domain": "agriculture",
+      "sub_domains": ["crop_farming", "livestock", "fisheries", "horticulture", "dairy", "organic_farming"],
+      "typical_entities": ["farm", "crop", "farmer", "harvest", "weather_reading", "soil_sample", "market"],
+      "typical_columns": ["farm_id", "farmer_id", "crop_type", "area_acres", "season", "sowing_date", "harvest_date", "yield_kg_per_acre", "total_yield_kg", "rainfall_mm", "temperature_celsius", "soil_ph", "fertilizer_used", "pesticide_used", "market_price_per_kg", "revenue"],
+      "key_metrics": ["yield_per_acre", "cost_of_cultivation", "net_farm_income", "crop_loss_pct"],
+      "regulations": ["APMC Act", "Food Safety Standards", "Organic certification"],
+      "typical_id_formats": {"farm_id": "FRM-{6digits}", "farmer_id": "FMR-{8digits}"}
+    },
+    {
+      "domain": "hospitality",
+      "sub_domains": ["hotels", "restaurants", "airlines", "cruise", "theme_parks", "events"],
+      "typical_entities": ["guest", "reservation", "room", "check_in", "check_out", "invoice", "staff"],
+      "typical_columns": ["reservation_id", "guest_id", "guest_name", "room_type", "room_number", "check_in_date", "check_out_date", "nights", "room_rate", "total_charges", "discount_applied", "payment_method", "meal_plan", "nationality", "source_of_booking", "rating", "review_score"],
+      "key_metrics": ["occupancy_rate", "revpar", "adr", "goppar", "guest_satisfaction"],
+      "regulations": ["GDPR", "PCI-DSS", "Local health and safety"],
+      "typical_id_formats": {"reservation_id": "RES-{8digits}", "guest_id": "GST-{6digits}", "room_number": "{floor}{2digits}"}
+    },
+    {
+      "domain": "energy",
+      "sub_domains": ["oil_gas", "renewable_solar", "renewable_wind", "hydroelectric", "nuclear", "electricity_distribution", "coal"],
+      "typical_entities": ["power_plant", "meter", "consumer", "grid_segment", "reading", "bill", "outage"],
+      "typical_columns": ["consumer_id", "meter_id", "meter_type", "reading_date", "units_consumed_kwh", "peak_units", "off_peak_units", "tariff_category", "billed_amount", "payment_status", "connection_type", "plant_id", "generation_mw", "capacity_mw", "fuel_type"],
+      "key_metrics": ["plant_load_factor", "distribution_loss_pct", "renewables_pct", "avg_tariff"],
+      "regulations": ["CERC", "FERC", "ISO 50001"],
+      "typical_id_formats": {"consumer_id": "CONS-{8digits}", "meter_id": "MTR-{10digits}"}
+    },
+    {
+      "domain": "fintech",
+      "sub_domains": ["payments", "lending", "wealthtech", "insurtech", "regtech", "crypto", "neobanking"],
+      "typical_entities": ["user", "wallet", "transaction", "kyc_record", "virtual_account", "merchant", "upi_payment"],
+      "typical_columns": ["user_id", "wallet_id", "upi_id", "merchant_id", "merchant_name", "transaction_id", "transaction_type", "amount", "currency", "transaction_date", "status", "payment_method", "device_type", "ip_address", "fraud_flag", "risk_score", "response_time_ms"],
+      "key_metrics": ["transaction_success_rate", "fraud_rate", "avg_transaction_value", "dau", "mau"],
+      "regulations": ["PCI-DSS", "RBI PPI Guidelines", "GDPR", "FATF"],
+      "typical_id_formats": {"user_id": "USR-{8digits}", "transaction_id": "TXN{14digits}", "wallet_id": "WLT-{10digits}"}
+    },
+    {
+      "domain": "supply_chain",
+      "sub_domains": ["procurement", "inventory", "supplier_management", "demand_planning", "cold_chain", "reverse_logistics"],
+      "typical_entities": ["supplier", "purchase_order", "invoice", "inventory_item", "warehouse", "demand_forecast"],
+      "typical_columns": ["po_number", "supplier_id", "supplier_name", "item_code", "item_name", "category", "quantity_ordered", "quantity_received", "unit_cost", "total_cost", "order_date", "expected_date", "actual_date", "lead_time_days", "warehouse_id", "stock_on_hand", "reorder_point", "safety_stock"],
+      "key_metrics": ["fill_rate", "inventory_turnover", "days_of_supply", "supplier_otp", "procurement_cost_savings"],
+      "regulations": ["ISO 28000", "CTPAT", "FDA food safety"],
+      "typical_id_formats": {"po_number": "PO-{8digits}", "supplier_id": "SUP-{6digits}", "item_code": "{3letters}{5digits}"}
+    },
+    {
+      "domain": "government",
+      "sub_domains": ["tax", "welfare", "land_records", "public_health", "law_enforcement", "elections", "civic_services"],
+      "typical_entities": ["citizen", "service_request", "officer", "department", "scheme", "beneficiary", "complaint"],
+      "typical_columns": ["citizen_id", "aadhar_number", "pan_number", "full_name", "date_of_birth", "gender", "caste_category", "address", "district", "state", "scheme_id", "scheme_name", "benefit_amount", "application_date", "approval_date", "status", "grievance_id"],
+      "key_metrics": ["service_delivery_rate", "avg_resolution_time", "beneficiary_satisfaction", "scheme_coverage"],
+      "regulations": ["RTI Act", "Aadhaar Act", "IT Act", "GDPR-equivalent"],
+      "typical_id_formats": {"citizen_id": "CIT-{8digits}", "aadhar_number": "{4digits} {4digits} {4digits}", "pan_number": "{5letters}{4digits}{1letter}"}
+    }
+  ]
+}
