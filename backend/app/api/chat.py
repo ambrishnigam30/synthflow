@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import AsyncSessionLocal, get_db
 from app.core.security import AuthTokenError, verify_token
 from app.models.conversation import Conversation, Message
 from app.models.user import User
@@ -67,7 +67,11 @@ async def websocket_chat(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    # Verify user owns this conversation
+    # Accept the connection first so we can send error messages if needed
+    await websocket.accept()
+
+    # Verify or auto-create the conversation.
+    # The frontend may use locally generated UUIDs that don't exist in the DB yet.
     stmt = select(Conversation).where(
         Conversation.id == conversation_id,
         Conversation.user_id == user.id,
@@ -75,12 +79,25 @@ async def websocket_chat(
     result = await db.execute(stmt)
     conv = result.scalar_one_or_none()
     if conv is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
+        conv = Conversation(
+            id=conversation_id,
+            user_id=user.id,
+            title="New conversation",
+        )
+        db.add(conv)
+        try:
+            await db.commit()
+            await db.refresh(conv)
+        except Exception:
+            await db.rollback()
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+            return
 
-    await websocket.accept()
+    # Notify client that connection is ready
+    await websocket.send_json({"type": "connected", "conversation_id": conversation_id})
+
     chat_svc = ChatService(db)
-    gen_svc = GenerationService(db)
+    gen_svc = GenerationService(db, session_factory=AsyncSessionLocal)
 
     try:
         while True:
@@ -121,12 +138,32 @@ async def websocket_chat(
                             })
                         )
 
+                    def done_cb(gen_id: str, result: dict) -> None:
+                        import asyncio
+                        asyncio.create_task(
+                            websocket.send_json({
+                                "type": "generation_done",
+                                "generation_id": gen_id,
+                                "quality_score": result.get("quality_score", 0.0),
+                                "preview_rows": result.get("preview_rows", []),
+                                "row_count": result.get("row_count", 0),
+                                "col_count": result.get("col_count", 0),
+                                "domain": result.get("domain", ""),
+                                "schema": result.get("schema", {}),
+                                "download_urls": result.get(
+                                    "download_urls",
+                                    {"csv": "", "excel": "", "json": "", "parquet": ""},
+                                ),
+                            })
+                        )
+
                     generation_id = await gen_svc.trigger_generation(
                         prompt=content,
                         user=user,
                         conversation_id=conversation_id,
                         options=options,
                         phase_callback=phase_cb,
+                        done_callback=done_cb,
                     )
                     await websocket.send_json({
                         "type": "generation_start",
@@ -146,7 +183,9 @@ async def websocket_chat(
             else:
                 # Conversational reply
                 reply_parts: list[str] = []
-                async for chunk in chat_svc.conversational_reply(content, context["history"]):
+                async for chunk in chat_svc.conversational_reply(
+                    content, context["history"], user_id=user.id
+                ):
                     await websocket.send_json({"type": "text_chunk", "content": chunk})
                     reply_parts.append(chunk)
 

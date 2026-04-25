@@ -37,9 +37,13 @@ def _err(message: str, code: str) -> dict[str, Any]:
 
 
 def _mask_key(encrypted_key: str) -> str:
-    """Return a safe masked representation of an encrypted API key."""
-    # We show just the class name prefix; real key never leaves encrypted form
-    return "sf_****"
+    """Return a masked representation showing the last 4 chars of the real key."""
+    try:
+        plain = decrypt_api_key(encrypted_key)
+        suffix = plain[-4:] if len(plain) >= 4 else plain
+        return "••••••••••••" + suffix
+    except Exception:
+        return "••••••••••••"
 
 
 @router.post("/")

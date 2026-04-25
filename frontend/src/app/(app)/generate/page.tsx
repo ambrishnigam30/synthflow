@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Plus, ChevronDown, X } from "lucide-react";
@@ -13,7 +13,7 @@ import {
   useGenerationStore,
   type GenerationResult,
 } from "@/lib/stores/generationStore";
-import { llmConfigApi } from "@/lib/api";
+import { llmConfigApi, generateApi } from "@/lib/api";
 import { SynthFlowWS } from "@/lib/ws";
 import type { WsGenerationDone } from "@/lib/ws";
 
@@ -508,6 +508,10 @@ function GenerateInner() {
 
   const wsRef = useRef<SynthFlowWS | null>(null);
   const pendingGenIdRef = useRef<string | null>(null);
+  // Queue of messages to send once WS is open
+  const pendingSendRef = useRef<(() => void) | null>(null);
+  // REST polling timer
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // LLM provider check
   const [hasProvider, setHasProvider] = useState<boolean | null>(null);
@@ -536,10 +540,66 @@ function GenerateInner() {
     return conv.id;
   }
 
-  function connectWs(convId: string) {
+  // REST fallback: poll generation status until done or failed
+  const startRestPolling = useCallback(
+    (generationId: string, convId: string) => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      startGeneration(generationId, convId, "");
+      pendingGenIdRef.current = generationId;
+      addMessage({
+        id: newMsgId(),
+        role: "system",
+        content: "Generation started (REST mode)…",
+        timestamp: new Date(),
+        generationId,
+      });
+
+      pollTimerRef.current = setInterval(async () => {
+        try {
+          const status = await generateApi.getStatus(generationId);
+          if (status.status === "done") {
+            clearInterval(pollTimerRef.current!);
+            pollTimerRef.current = null;
+            const result: GenerationResult = {
+              generationId: status.id,
+              domain: status.domain ?? "",
+              rowCount: status.row_count ?? 0,
+              colCount: status.col_count ?? 0,
+              qualityScore: status.quality_score ?? 0,
+              previewRows: [],
+              schema: {},
+              downloadUrls: { csv: "", excel: "", json: "", parquet: "" },
+              createdAt: new Date(status.created_at),
+            };
+            setResult(generationId, result);
+            pendingGenIdRef.current = null;
+          } else if (status.status === "failed") {
+            clearInterval(pollTimerRef.current!);
+            pollTimerRef.current = null;
+            setError(generationId, "Generation failed. Check your provider settings.");
+            pendingGenIdRef.current = null;
+          }
+        } catch {
+          // keep polling
+        }
+      }, 2000);
+    },
+    [addMessage, startGeneration, setResult, setError]
+  );
+
+  function connectWs(convId: string, onReady?: () => void) {
     wsRef.current?.disconnect();
 
     wsRef.current = new SynthFlowWS(convId, {
+      onOpen: () => {
+        // WS socket opened — fire pending message immediately
+        onReady?.();
+        pendingSendRef.current?.();
+        pendingSendRef.current = null;
+      },
+      onConnected: () => {
+        // Backend confirmed connection
+      },
       onTextChunk: (chunk) => {
         setStreaming(true);
         appendStreamChunk(chunk);
@@ -547,7 +607,6 @@ function GenerateInner() {
       onGenerationStart: (genId) => {
         startGeneration(genId, convId, "");
         pendingGenIdRef.current = genId;
-        // Add system message with linked genId
         addMessage({
           id: newMsgId(),
           role: "system",
@@ -594,12 +653,12 @@ function GenerateInner() {
       },
       onClose: () => {
         // Flush streaming content to a message
-        const content = useChatStore.getState().streamingContent;
-        if (content.trim()) {
+        const streamContent = useChatStore.getState().streamingContent;
+        if (streamContent.trim()) {
           useChatStore.getState().addMessage({
             id: newMsgId(),
             role: "assistant",
-            content,
+            content: streamContent,
             timestamp: new Date(),
           });
         }
@@ -614,6 +673,10 @@ function GenerateInner() {
   function handleNewChat() {
     wsRef.current?.disconnect();
     wsRef.current = null;
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
     const conv = createConversation("New conversation");
     setActiveConversation(conv.id);
   }
@@ -627,7 +690,7 @@ function GenerateInner() {
 
     const convId = ensureConversation();
 
-    // Add user message
+    // Add user message to UI
     addMessage({
       id: newMsgId(),
       role: "user",
@@ -635,24 +698,8 @@ function GenerateInner() {
       timestamp: new Date(),
     });
 
-    // Ensure WS connected
-    if (!wsRef.current?.connected) {
-      connectWs(convId);
-    }
-
-    // Small delay to let WS open
-    setTimeout(() => {
-      if (!wsRef.current?.connected) {
-        // WS failed to connect — backend unreachable
-        addMessage({
-          id: newMsgId(),
-          role: "system",
-          content: "Could not reach the server. Please check your connection and try again.",
-          timestamp: new Date(),
-        });
-        setStreaming(false);
-        return;
-      }
+    function doSend() {
+      if (!wsRef.current) return;
       wsRef.current.send({
         type: "message",
         content,
@@ -664,7 +711,46 @@ function GenerateInner() {
           scenario: opts.scenario,
         },
       });
-    }, 300);
+    }
+
+    if (wsRef.current?.connected) {
+      // Already connected — send immediately
+      doSend();
+    } else {
+      // Queue the send for when the socket opens; connect now
+      pendingSendRef.current = doSend;
+
+      // WS fallback timeout: if socket doesn't open in 6 seconds, use REST API
+      const wsTimeoutId = setTimeout(() => {
+        if (!wsRef.current?.connected) {
+          pendingSendRef.current = null;
+          wsRef.current?.disconnect();
+          // Try REST generation fallback
+          generateApi
+            .trigger(content, {
+              conversationId: convId,
+              rowCount: opts.rowCount,
+              seed: opts.seed,
+              scenario: opts.scenario,
+              outputFormat: opts.outputFormat,
+            })
+            .then(({ generation_id }) => {
+              startRestPolling(generation_id, convId);
+            })
+            .catch(() => {
+              addMessage({
+                id: newMsgId(),
+                role: "system",
+                content:
+                  "Could not reach the server. Please check the backend is running and try again.",
+                timestamp: new Date(),
+              });
+            });
+        }
+      }, 6000);
+
+      connectWs(convId, () => clearTimeout(wsTimeoutId));
+    }
   }
 
   const hasMessages = messages.length > 0;

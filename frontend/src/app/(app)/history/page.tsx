@@ -19,89 +19,6 @@ interface HistoryRow {
   conversationId: string;
 }
 
-// ── Mock data ─────────────────────────────────────────────────────────────────
-
-const MOCK_HISTORY: HistoryRow[] = [
-  {
-    id: "g1",
-    prompt: "Generate 10,000 patient records for a cardiology department in Mumbai",
-    domain: "Healthcare",
-    rows: 10000,
-    cols: 18,
-    qualityScore: 94.2,
-    status: "done",
-    date: "2026-04-24",
-    conversationId: "c1",
-  },
-  {
-    id: "g2",
-    prompt: "Banking transaction dataset with 5% fraud rate, HDFC",
-    domain: "Banking",
-    rows: 50000,
-    cols: 22,
-    qualityScore: 91.5,
-    status: "done",
-    date: "2026-04-23",
-    conversationId: "c2",
-  },
-  {
-    id: "g3",
-    prompt: "E-commerce order history with seasonal patterns, India",
-    domain: "Retail",
-    rows: 25000,
-    cols: 15,
-    qualityScore: 88.1,
-    status: "done",
-    date: "2026-04-22",
-    conversationId: "c3",
-  },
-  {
-    id: "g4",
-    prompt: "Crop yield data Punjab wheat season with weather correlation",
-    domain: "Agriculture",
-    rows: 8000,
-    cols: 12,
-    qualityScore: 96.0,
-    status: "done",
-    date: "2026-04-21",
-    conversationId: "c4",
-  },
-  {
-    id: "g5",
-    prompt: "Smart factory sensor readings with anomaly injection 100K rows",
-    domain: "IoT",
-    rows: 100000,
-    cols: 28,
-    qualityScore: 89.3,
-    status: "done",
-    date: "2026-04-20",
-    conversationId: "c5",
-  },
-  {
-    id: "g6",
-    prompt: "Student performance dataset across 12 subjects Maharashtra Board",
-    domain: "Education",
-    rows: 5000,
-    cols: 16,
-    qualityScore: 92.7,
-    status: "done",
-    date: "2026-04-19",
-    conversationId: "c6",
-  },
-  {
-    id: "g7",
-    prompt: "HR attrition dataset with salary bands and performance ratings",
-    domain: "HR",
-    rows: 12000,
-    cols: 20,
-    qualityScore: 0,
-    status: "error",
-    date: "2026-04-18",
-    conversationId: "c7",
-  },
-];
-
-// kept as fallback — shown if API call fails
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -403,7 +320,7 @@ export default function HistoryPage() {
         if (cancelled) return;
         const mapped: HistoryRow[] = res.items.map((g) => ({
           id: g.id,
-          prompt: g.prompt,
+          prompt: g.prompt ?? "",
           domain: g.domain ?? "General",
           rows: g.row_count ?? 0,
           cols: g.col_count ?? 0,
@@ -414,7 +331,7 @@ export default function HistoryPage() {
         }));
         setRows(mapped);
       } catch {
-        setRows(MOCK_HISTORY); // fallback to mock on error
+        setRows([]); // show empty state on error
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -477,6 +394,32 @@ export default function HistoryPage() {
     return (
       <div className="flex items-center justify-center h-full" style={{ color: "rgba(38,37,30,0.4)", fontFamily: "system-ui", fontSize: "14px" }}>
         Loading history…
+      </div>
+    );
+  }
+
+  if (!loading && rows.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4">
+        <p style={{ fontFamily: "var(--font-satoshi, system-ui, sans-serif)", fontSize: "16px", color: "rgba(38,37,30,0.45)" }}>
+          No generations yet
+        </p>
+        <button
+          onClick={() => router.push("/app/generate")}
+          style={{
+            background: "#f54e00",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "8px",
+            padding: "10px 20px",
+            fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
+            fontSize: "14px",
+            fontWeight: 400,
+            cursor: "pointer",
+          }}
+        >
+          Generate your first dataset
+        </button>
       </div>
     );
   }
@@ -743,7 +686,7 @@ export default function HistoryPage() {
             </tbody>
           </table>
 
-          {filtered.length === 0 && (
+          {filtered.length === 0 && rows.length > 0 && (
             <div
               className="flex items-center justify-center py-16"
               style={{
@@ -752,7 +695,7 @@ export default function HistoryPage() {
                 color: "rgba(38,37,30,0.35)",
               }}
             >
-              No results found
+              No results match your filters
             </div>
           )}
         </div>

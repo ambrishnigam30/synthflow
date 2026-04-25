@@ -304,11 +304,15 @@ export default function DashboardPage() {
     generated: false,
     explored: false,
   });
-  const [onboardingDismissed, setOnboardingDismissed] = useState(true); // default hidden until loaded
+  // Start as false (show by default); set to true if localStorage says dismissed.
+  // Using false avoids "hidden until effect runs" edge case for brand-new users.
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
 
   useEffect(() => {
     const dismissed = localStorage.getItem("sf_onboarding_dismissed") === "true";
     setOnboardingDismissed(dismissed);
+    setOnboardingChecked(true);
     if (!dismissed) {
       llmConfigApi.list().then((configs) => {
         setOnboarding((prev) => ({ ...prev, providerAdded: configs.length > 0 }));
@@ -361,7 +365,8 @@ export default function DashboardPage() {
     }
   }, [onboarding, onboardingDismissed]);
 
-  const showOnboarding = !onboardingDismissed && !loadingData;
+  // Show onboarding once: localStorage has been checked AND data loaded AND not dismissed
+  const showOnboarding = onboardingChecked && !onboardingDismissed && !loadingData;
 
   return (
     <div className="p-6 max-w-[1200px] mx-auto">
@@ -642,17 +647,17 @@ export default function DashboardPage() {
                     >
                       {gen.prompt}
                     </p>
-                    {gen.quality_score > 0 && (
+                    {(gen.quality_score ?? 0) > 0 && (
                       <span
                         style={{
                           fontFamily: "var(--font-mono, monospace)",
                           fontSize: "13px",
                           fontWeight: 400,
-                          color: qualityColor(gen.quality_score),
+                          color: qualityColor(gen.quality_score ?? 0),
                           flexShrink: 0,
                         }}
                       >
-                        {gen.quality_score.toFixed(1)}
+                        {(gen.quality_score ?? 0).toFixed(1)}
                       </span>
                     )}
                   </div>
@@ -661,7 +666,7 @@ export default function DashboardPage() {
                       {gen.domain}
                     </span>
                     <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: "11px", color: "rgba(38,37,30,0.4)" }}>
-                      {formatRows(gen.row_count)} rows
+                      {formatRows(gen.row_count ?? 0)} rows
                     </span>
                     <span style={{ fontFamily: "system-ui", fontSize: "11px", color: "rgba(38,37,30,0.35)" }}>
                       {gen.created_at.slice(0, 10)}

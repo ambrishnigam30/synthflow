@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -45,11 +46,39 @@ _PLAN_GEN_CAPS: dict[str, int] = {
     "enterprise": 0,
 }
 
+# Callback types
 PhaseCallback = Callable[[int, float, str], None]
+DoneCallback = Callable[[str, dict[str, Any]], None]
+ErrorCallback = Callable[[str, str], None]  # (generation_id, error_message)
 
 
 class PlanLimitError(Exception):
     """Raised when the user has exceeded their plan limits."""
+
+
+def _parse_row_count(prompt: str, default: int = 100) -> int:
+    """
+    Extract a row count from a natural-language prompt.
+
+    Handles patterns like:
+      "Generate 50 Indian healthcare patient records"
+      "5,000 rows of banking data"
+      "create 100 records"
+    Returns ``default`` if no number is found near a row/record keyword.
+    """
+    # Find a number that appears before "rows" or "records" with up to 8 words in between
+    match = re.search(
+        r"\b(\d[\d,]*)\b(?:\s+\w+){0,8}\s+(?:rows?|records?)\b",
+        prompt,
+        re.IGNORECASE,
+    )
+    if match:
+        return int(match.group(1).replace(",", ""))
+    # Fallback: any standalone large number in the prompt (likely a row count)
+    numbers = re.findall(r"\b(\d{2,}[\d,]*)\b", prompt)
+    if numbers:
+        return int(numbers[0].replace(",", ""))
+    return default
 
 
 class GenerationService:
@@ -93,21 +122,20 @@ class GenerationService:
         conversation_id: str | None = None,
         options: dict[str, Any] | None = None,
         phase_callback: PhaseCallback | None = None,
+        done_callback: DoneCallback | None = None,
+        error_callback: ErrorCallback | None = None,
     ) -> str:
         """
         Create a Generation DB record, launch background engine task.
         Returns ``generation_id`` immediately (non-blocking).
         """
         opts = options or {}
-        # Quick row-count estimate from prompt for limit check
-        import re
-        row_match = re.search(r"\b(\d[\d,]*)\s*(rows?|records?)\b", prompt, re.IGNORECASE)
-        requested_rows = int(row_match.group(1).replace(",", "")) if row_match else 1_000
+        requested_rows = _parse_row_count(prompt)
 
         await self._check_plan_limits(user, requested_rows)
 
-        session_id = str(uuid.uuid4())
         generation_id = str(uuid.uuid4())
+        session_id = str(uuid.uuid4())
 
         gen = Generation(
             id=generation_id,
@@ -116,6 +144,7 @@ class GenerationService:
             session_id=session_id,
             status="pending",
             row_count=requested_rows,
+            intent_json={"prompt": prompt},
         )
         self._db.add(gen)
         await self._db.commit()
@@ -152,6 +181,8 @@ class GenerationService:
                 plan=user.plan,
                 options=opts,
                 phase_callback=phase_callback,
+                done_callback=done_callback,
+                error_callback=error_callback,
                 llm_provider=llm_provider,
                 llm_api_key=llm_api_key,
                 llm_model=llm_model,
@@ -171,26 +202,25 @@ class GenerationService:
         plan: str,
         options: dict[str, Any],
         phase_callback: PhaseCallback | None,
+        done_callback: DoneCallback | None = None,
+        error_callback: ErrorCallback | None = None,
         llm_provider: str | None = None,
         llm_api_key: str | None = None,
         llm_model: str | None = None,
     ) -> None:
-        """
-        Run the SynthFlow engine in a background task.
-        Uses a fresh DB session (cannot share the request session across tasks).
-        """
-        # Get a fresh session for background work
+        """Run the SynthFlow engine in a background task with a fresh DB session."""
         if self._session_factory is not None:
             async with self._session_factory() as bg_db:
                 await self._execute_engine(
                     bg_db, generation_id, session_id, prompt, user_id, plan, options,
-                    phase_callback, llm_provider, llm_api_key, llm_model,
+                    phase_callback, done_callback, error_callback,
+                    llm_provider, llm_api_key, llm_model,
                 )
         else:
-            # Fallback: use the same session (test mode)
             await self._execute_engine(
                 self._db, generation_id, session_id, prompt, user_id, plan, options,
-                phase_callback, llm_provider, llm_api_key, llm_model,
+                phase_callback, done_callback, error_callback,
+                llm_provider, llm_api_key, llm_model,
             )
 
     async def _execute_engine(
@@ -203,52 +233,50 @@ class GenerationService:
         plan: str,
         options: dict[str, Any],
         phase_callback: PhaseCallback | None,
+        done_callback: DoneCallback | None = None,
+        error_callback: ErrorCallback | None = None,
         llm_provider: str | None = None,
         llm_api_key: str | None = None,
         llm_model: str | None = None,
     ) -> None:
-        """Update DB as engine phases complete. Graceful fallback if engine unavailable."""
+        """Drive the real SynthFlow engine. Fails loudly if the engine can't run."""
         try:
             await self._update_status(db, generation_id, "running")
 
-            # Attempt real engine import
-            try:
-                from synthflow.orchestrator import SynthFlowOrchestrator  # type: ignore[import]
-                await self._run_real_engine(
-                    db, generation_id, session_id, prompt, options, phase_callback,
-                    llm_provider, llm_api_key, llm_model,
+            # Guard: no LLM key → fail early with a helpful message
+            if not llm_provider or not llm_api_key:
+                msg = (
+                    "No LLM API key configured. "
+                    "Please go to Settings → Providers and add your API key."
                 )
+                await self._update_status(db, generation_id, "failed", error_message=msg)
+                if error_callback:
+                    error_callback(generation_id, msg)
                 return
-            except ImportError:
-                logger.warning(
-                    "SynthFlow engine not installed in backend venv; using stub result."
-                )
 
-            # Stub result when engine is not available
-            await self._simulate_phases(phase_callback)
-            await self._update_status(
-                db,
-                generation_id,
-                "done",
-                quality_score=88.5,
-                privacy_score=92.0,
-                glass_box_code="# Generated stub code\ndef generate(row_count, seed):\n    import pandas as pd\n    return pd.DataFrame({'id': range(row_count)})\n",
-                intent_json={"prompt": prompt, "session_id": session_id},
+            await self._run_real_engine(
+                db, generation_id, session_id, prompt, options,
+                phase_callback, done_callback,
+                llm_provider, llm_api_key, llm_model,
             )
 
-            # Track usage
+            # Track usage on success
             usage_svc = UsageService(db)
             stmt = select(Generation).where(Generation.id == generation_id)
             result = await db.execute(stmt)
             gen = result.scalar_one_or_none()
             if gen:
-                await usage_svc.track(
-                    user_id, "generation", {"row_count": gen.row_count or 0}
-                )
+                await usage_svc.track(user_id, "generation", {"row_count": gen.row_count or 0})
 
         except Exception as exc:
             logger.exception("Generation %s failed: %s", generation_id, exc)
-            await self._update_status(db, generation_id, "failed", error_message=str(exc))
+            error_msg = str(exc)
+            try:
+                await self._update_status(db, generation_id, "failed", error_message=error_msg)
+            except Exception as db_exc:
+                logger.error("Could not update failed status for %s: %s", generation_id, db_exc)
+            if error_callback:
+                error_callback(generation_id, error_msg)
 
     async def _run_real_engine(
         self,
@@ -258,64 +286,136 @@ class GenerationService:
         prompt: str,
         options: dict[str, Any],
         phase_callback: PhaseCallback | None,
+        done_callback: DoneCallback | None = None,
         llm_provider: str | None = None,
         llm_api_key: str | None = None,
         llm_model: str | None = None,
     ) -> None:
-        """Run the actual SynthFlow engine (only when installed)."""
-        from synthflow.orchestrator import SynthFlowOrchestrator  # type: ignore[import]
+        """Run the SynthFlow engine pipeline and update the DB with the result."""
+        from synthflow.core import SynthFlowContainer
+        from synthflow.llm_client import LLMClient, LLMConfigError
+        from synthflow.orchestrator import OrchestrationError, SynthFlowOrchestrator
 
-        def _phase_cb(phase: int, progress: float, message: str) -> None:
+        # Look up the persisted row_count from DB (already stored by trigger_generation)
+        stmt = select(Generation).where(Generation.id == generation_id)
+        result = await db.execute(stmt)
+        gen = result.scalar_one_or_none()
+        row_count: int | None = gen.row_count if gen else None
+        seed: int = options.get("seed", 42)
+
+        # Async progress_callback that bridges phase_callback (sync fire-and-forget)
+        # to the engine's expected Callable[[int, float, str], Awaitable[None]]
+        async def _engine_progress(phase: int, fraction: float, message: str) -> None:
             if phase_callback:
-                phase_callback(phase, progress, message)
+                try:
+                    phase_callback(phase, fraction, message)
+                except Exception as cb_exc:
+                    logger.debug("Phase callback error (ignored): %s", cb_exc)
 
-        # Build engine kwargs — only pass provider/key if the user has configured one
-        engine_kwargs: dict[str, Any] = {
-            "prompt": prompt,
-            "seed": options.get("seed", 42),
-            "progress_callback": _phase_cb,
-        }
-        if llm_provider and llm_api_key:
-            engine_kwargs["provider"] = llm_provider
-            engine_kwargs["api_key"] = llm_api_key
-        if llm_model:
-            engine_kwargs["model"] = llm_model
+        # Wire up the engine with the user's LLM key
+        llm_client = LLMClient(
+            provider=llm_provider,  # type: ignore[arg-type]
+            api_key=llm_api_key,    # type: ignore[arg-type]
+            model=llm_model or None,
+        )
+        try:
+            container = SynthFlowContainer(llm_client=llm_client)
+            orchestrator = SynthFlowOrchestrator(container)
 
-        orchestrator = SynthFlowOrchestrator()
-        result = await orchestrator.run(**engine_kwargs)
+            logger.info(
+                "Generation %s starting: provider=%s model=%s rows=%s prompt=%r",
+                generation_id, llm_provider, llm_model, row_count, prompt[:80],
+            )
 
-        code = getattr(result, "generated_code", "")
-        quality = getattr(getattr(result, "quality_report", None), "overall_score", None)
-        privacy = getattr(getattr(result, "privacy_report", None), "privacy_score", None)
+            engine_result = await orchestrator.generate(
+                prompt=prompt,
+                row_count=row_count,
+                seed=seed,
+                scenario_text=options.get("scenario"),
+                enable_dirty_data=options.get("enable_dirty_data", True),
+                enable_sdv=options.get("enable_sdv", False),
+                progress_callback=_engine_progress,
+            )
+        except LLMConfigError as exc:
+            raise RuntimeError(f"LLM configuration error: {exc}") from exc
+        except OrchestrationError as exc:
+            raise RuntimeError(f"Engine pipeline failed: {exc}") from exc
+        finally:
+            # Always close the httpx client
+            await llm_client._http.aclose()
 
+        # ── Extract results from GenerationResult ────────────────────────
+        df = engine_result.dataframe
+        quality_report = engine_result.quality_report
+        privacy_report = engine_result.privacy_report
+        intent = engine_result.intent
+        generated_code = engine_result.generated_code
+
+        quality_score: float | None = None
+        if quality_report is not None:
+            quality_score = float(getattr(quality_report, "overall_score", 0.0) or 0.0)
+
+        privacy_score: float | None = None
+        if privacy_report is not None:
+            privacy_score = float(getattr(privacy_report, "privacy_score", 0.0) or 0.0)
+
+        domain: str | None = getattr(intent, "domain", None) if intent else None
+        final_row_count: int = len(df) if df is not None else 0
+
+        preview_rows: list[dict[str, Any]] = []
+        col_count: int = 0
+        if df is not None and hasattr(df, "head"):
+            try:
+                preview_rows = df.head(10).fillna("").to_dict(orient="records")
+                col_count = len(df.columns)
+            except Exception as df_exc:
+                logger.warning("Could not extract preview rows: %s", df_exc)
+
+        schema_dict: dict[str, Any] = {}
+        if engine_result.schema is not None:
+            try:
+                schema_dict = engine_result.schema.model_dump()
+            except Exception:
+                pass
+
+        intent_dict: dict[str, Any] = {"prompt": prompt}
+        if intent is not None:
+            try:
+                intent_dict = intent.model_dump()
+                intent_dict["prompt"] = prompt
+            except Exception:
+                pass
+
+        # Persist final result to DB
         await self._update_status(
             db,
             generation_id,
             "done",
-            quality_score=float(quality) if quality is not None else None,
-            privacy_score=float(privacy) if privacy is not None else None,
-            glass_box_code=code,
-            domain=getattr(getattr(result, "intent", None), "domain", None),
-            row_count=getattr(getattr(result, "intent", None), "row_count", None),
+            quality_score=quality_score,
+            privacy_score=privacy_score,
+            glass_box_code=generated_code,
+            domain=domain,
+            row_count=final_row_count,
+            schema_json=schema_dict,
+            intent_json=intent_dict,
         )
 
-    async def _simulate_phases(self, callback: PhaseCallback | None) -> None:
-        """Fire phase callbacks for stub mode (9 phases at ~10ms each)."""
-        phase_messages = [
-            "Parsing intent…",
-            "Activating knowledge graph…",
-            "Designing schema…",
-            "Building constraints…",
-            "Modelling distributions…",
-            "Synthesizing data…",
-            "Applying correlations…",
-            "Validating output…",
-            "Computing quality scores…",
-        ]
-        for i, msg in enumerate(phase_messages, start=1):
-            if callback:
-                callback(i, i / 9, msg)
-            await asyncio.sleep(0.01)
+        logger.info(
+            "Generation %s complete: %d rows, %d cols, quality=%.1f",
+            generation_id, final_row_count, col_count, quality_score or 0.0,
+        )
+
+        # Notify the WebSocket handler that generation is done
+        if done_callback:
+            done_callback(generation_id, {
+                "quality_score": quality_score or 0.0,
+                "preview_rows": preview_rows,
+                "row_count": final_row_count,
+                "col_count": col_count,
+                "domain": domain or "",
+                "schema": schema_dict,
+                "download_urls": {"csv": "", "excel": "", "json": "", "parquet": ""},
+            })
 
     async def _update_status(
         self,
@@ -328,6 +428,7 @@ class GenerationService:
         error_message: str | None = None,
         domain: str | None = None,
         row_count: int | None = None,
+        schema_json: dict[str, Any] | None = None,
         intent_json: dict[str, Any] | None = None,
     ) -> None:
         stmt = select(Generation).where(Generation.id == generation_id)
@@ -350,6 +451,8 @@ class GenerationService:
             gen.domain = domain
         if row_count is not None:
             gen.row_count = row_count
+        if schema_json is not None:
+            gen.schema_json = schema_json
         if intent_json is not None:
             gen.intent_json = intent_json
 

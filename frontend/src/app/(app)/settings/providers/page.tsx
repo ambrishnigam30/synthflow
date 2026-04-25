@@ -17,6 +17,8 @@ interface Provider {
 interface ProviderState {
   /** Key typed by user. Empty = use stored key (don't re-save). */
   apiKey: string;
+  /** Masked key from DB, e.g. "••••••••••••abcd". Shown as placeholder when saved. */
+  maskedKey: string;
   model: string;
   isDefault: boolean;
   /** Whether a saved config exists in the DB for this provider. */
@@ -59,6 +61,7 @@ const PROVIDERS: Provider[] = [
 function initialState(p: Provider, i: number): ProviderState {
   return {
     apiKey: "",
+    maskedKey: "",
     model: p.models[0],
     isDefault: i === 0,
     isSaved: false,
@@ -217,8 +220,10 @@ function ProviderCard({
               value={state.apiKey}
               onChange={(e) => onChange({ apiKey: e.target.value, testResult: null })}
               placeholder={
-                state.isSaved
-                  ? "Enter new key to update (current key is saved)"
+                state.isSaved && state.maskedKey
+                  ? state.maskedKey
+                  : state.isSaved
+                  ? "Enter new key to update"
                   : provider.placeholder
               }
               style={{
@@ -402,6 +407,7 @@ export default function ProvidersPage() {
               isDefault: cfg.is_default,
               isSaved: true,
               status: "connected",
+              maskedKey: cfg.masked_key ?? "",
             };
           }
         }
@@ -442,13 +448,14 @@ export default function ProvidersPage() {
     if (!state.apiKey.trim()) return;
     patch(id, { saving: true });
     try {
-      await llmConfigApi.save(id, state.apiKey.trim(), state.model, state.isDefault);
+      const saved = await llmConfigApi.save(id, state.apiKey.trim(), state.model, state.isDefault);
       patch(id, {
         saving: false,
         savedFlash: true,
         isSaved: true,
         status: "connected",
         apiKey: "", // clear input after save; stored key is now in DB
+        maskedKey: saved.masked_key ?? "",
       });
       setTimeout(() => patch(id, { savedFlash: false }), 2500);
     } catch (err) {

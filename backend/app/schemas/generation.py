@@ -58,6 +58,8 @@ class GenerationStatus(BaseModel):
 class GenerationListItem(BaseModel):
     id: str
     session_id: str
+    conversation_id: str | None = None
+    prompt: str | None = None
     domain: str | None = None
     sub_domain: str | None = None
     row_count: int | None = None

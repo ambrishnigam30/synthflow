@@ -32,16 +32,18 @@ def _ok(data: object) -> dict:
 async def list_generations(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    limit: int | None = Query(None, ge=1, le=500),
     domain: str | None = Query(None),
     generation_status: str | None = Query(None, alias="status"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     svc = GenerationService(db)
+    effective_page_size = limit if limit is not None else page_size
     gens = await svc.list_generations(
         user_id=user.id,
         page=page,
-        page_size=page_size,
+        page_size=effective_page_size,
         domain=domain,
         status=generation_status,
     )
@@ -49,6 +51,8 @@ async def list_generations(
         GenerationListItem(
             id=g.id,
             session_id=g.session_id,
+            conversation_id=g.conversation_id,
+            prompt=(g.intent_json or {}).get("prompt") if g.intent_json else None,
             domain=g.domain,
             sub_domain=g.sub_domain,
             row_count=g.row_count,
@@ -59,7 +63,7 @@ async def list_generations(
         ).model_dump()
         for g in gens
     ]
-    return _ok({"generations": items, "page": page, "page_size": page_size})
+    return _ok({"items": items, "total": len(items), "page": page, "page_size": effective_page_size})
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
