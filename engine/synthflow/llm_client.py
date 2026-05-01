@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from typing import Any, Optional
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_chain, wait_fixed
 
 from synthflow.utils.helpers import LLMParseError, safe_json_loads
+
+log = logging.getLogger(__name__)
 
 
 # ── Exceptions ─────────────────────────────────────────────────────────────
@@ -154,6 +157,7 @@ class LLMClient:
 
         Retries up to 3 times with exponential back-off (2 s, 4 s, 8 s).
         """
+        log.info("LLM call using provider=%s, model=%s", self.provider, self.model)
         if self.provider in ("openai", "groq"):
             return await self._complete_openai_compat(
                 prompt, system_prompt, json_mode, temperature, max_tokens

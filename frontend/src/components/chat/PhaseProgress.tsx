@@ -11,6 +11,7 @@ const PHASE_STATUS_STYLES: Record<
   done: { icon: "✓", color: "#1f8a65" },
   active: { icon: "●", color: "#f54e00", animation: "pulse 1.5s ease-in-out infinite" },
   pending: { icon: "○", color: "rgba(38,37,30,0.3)" },
+  failed: { icon: "✗", color: "#cf2d56" },
 };
 
 // ── Pulse animation ───────────────────────────────────────────────────────────
@@ -28,6 +29,9 @@ interface PhaseProgressProps {
   phases: GenerationPhase[];
   progress: number; // 0–1
   compact?: boolean;
+  isFailed?: boolean;
+  failedMessage?: string;
+  onRetry?: () => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -36,15 +40,20 @@ export default function PhaseProgress({
   phases,
   progress,
   compact = false,
+  isFailed = false,
+  failedMessage,
+  onRetry,
 }: PhaseProgressProps) {
   const pct = Math.min(Math.max(progress, 0), 1) * 100;
+  const barColor = isFailed ? "#cf2d56" : "#f54e00";
+  const labelColor = isFailed ? "#cf2d56" : "rgba(38,37,30,0.5)";
 
   return (
     <div
       className="rounded-[8px] p-4"
       style={{
         background: "#ebeae5",
-        border: "1px solid rgba(38,37,30,0.1)",
+        border: `1px solid ${isFailed ? "rgba(207,45,86,0.2)" : "rgba(38,37,30,0.1)"}`,
       }}
     >
       <style>{PULSE_CSS}</style>
@@ -57,7 +66,7 @@ export default function PhaseProgress({
         >
           <div
             className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${pct}%`, background: "#f54e00" }}
+            style={{ width: `${pct}%`, background: barColor }}
           />
         </div>
         <div className="flex justify-between mt-1">
@@ -66,18 +75,18 @@ export default function PhaseProgress({
               fontFamily: "var(--font-mono, monospace)",
               fontSize: "11px",
               fontWeight: 500,
-              color: "rgba(38,37,30,0.5)",
+              color: labelColor,
               textTransform: "uppercase",
               letterSpacing: "0.048px",
             }}
           >
-            Generating
+            {isFailed ? "Generation Failed" : "Generating"}
           </span>
           <span
             style={{
               fontFamily: "var(--font-mono, monospace)",
               fontSize: "11px",
-              color: "#f54e00",
+              color: barColor,
             }}
           >
             {Math.round(pct)}%
@@ -124,6 +133,50 @@ export default function PhaseProgress({
           );
         })}
       </ol>
+
+      {/* Failure details */}
+      {isFailed && failedMessage && (
+        <div
+          className="mt-4 pt-3"
+          style={{ borderTop: "1px solid rgba(207,45,86,0.15)" }}
+        >
+          <p
+            style={{
+              fontFamily: "system-ui",
+              fontSize: "12px",
+              color: "#cf2d56",
+              lineHeight: 1.5,
+              marginBottom: onRetry ? "10px" : 0,
+            }}
+          >
+            {failedMessage}
+          </p>
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              style={{
+                background: "#ebeae5",
+                border: "1px solid rgba(207,45,86,0.3)",
+                borderRadius: "6px",
+                padding: "6px 12px",
+                fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
+                fontSize: "12px",
+                fontWeight: 400,
+                color: "#cf2d56",
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.background = "rgba(207,45,86,0.08)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.background = "#ebeae5";
+              }}
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

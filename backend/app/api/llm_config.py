@@ -263,8 +263,40 @@ async def _test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:
                     return True, "Gemini API key is valid."
                 return False, f"Google returned HTTP {resp.status_code}."
 
+        if provider_lower == "groq":
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{"role": "user", "content": "Hi"}],
+                        "max_tokens": 5,
+                    },
+                    timeout=15.0,
+                )
+                if resp.status_code == 200:
+                    return True, "Groq API key is valid."
+                return False, f"Groq returned HTTP {resp.status_code}."
+
         return False, f"Provider '{provider}' is not supported for testing."
 
     except httpx.RequestError as exc:
-        logger.warning("LLM key test request error for provider %r: %s", provider, exc)
-        return False, f"Network error while testing key: {exc}"
+        import traceback
+        traceback.print_exc()
+        logger.error(
+            "LLM key test request error for provider %r: %s: %s",
+            provider, type(exc).__name__, exc,
+        )
+        return False, f"{type(exc).__name__}: {exc}"
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        logger.error(
+            "LLM key test unexpected error for provider %r: %s: %s",
+            provider, type(exc).__name__, exc,
+        )
+        return False, f"{type(exc).__name__}: {exc}"

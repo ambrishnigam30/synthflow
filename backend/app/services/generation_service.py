@@ -9,7 +9,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import math
 import re
 import uuid
 from collections.abc import Callable
@@ -34,12 +36,18 @@ logger = logging.getLogger(__name__)
 
 def _make_json_safe(obj: Any) -> Any:
     """Convert pandas/numpy types to JSON-serializable Python types."""
+    if obj is None:
+        return None
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
     if isinstance(obj, (pd.Timestamp, datetime)):
         return obj.isoformat()
     if isinstance(obj, np.integer):
         return int(obj)
     if isinstance(obj, np.floating):
-        return float(obj) if not np.isnan(obj) else None
+        if np.isnan(obj) or np.isinf(obj):
+            return None
+        return float(obj)
     if isinstance(obj, np.bool_):
         return bool(obj)
     if isinstance(obj, np.ndarray):
@@ -50,6 +58,15 @@ def _make_json_safe(obj: Any) -> Any:
     except (TypeError, ValueError):
         pass
     return obj
+
+
+def _sanitize_for_json(data: Any) -> Any:
+    """Final sweep: replace any remaining NaN/Infinity with None for valid JSON."""
+    text = json.dumps(data, default=str)
+    text = text.replace(": NaN", ": null").replace(":NaN", ":null")
+    text = text.replace(": Infinity", ": null").replace(":Infinity", ":null")
+    text = text.replace(": -Infinity", ": null").replace(":-Infinity", ":null")
+    return json.loads(text)
 
 # Plan row limits
 _PLAN_ROW_CAPS: dict[str, int] = {
@@ -72,7 +89,7 @@ _PLAN_GEN_CAPS: dict[str, int] = {
 # Callback types
 PhaseCallback = Callable[[int, float, str], None]
 DoneCallback = Callable[[str, dict[str, Any]], None]
-ErrorCallback = Callable[[str, str], None]  # (generation_id, error_message)
+ErrorCallback = Callable[[str, str, int, float], None]  # (generation_id, error_message, phase, progress)
 
 
 class PlanLimitError(Exception):
@@ -180,6 +197,7 @@ class GenerationService:
             cfg_stmt = (
                 select(LLMConfig)
                 .where(LLMConfig.user_id == user.id, LLMConfig.is_active == True)  # noqa: E712
+                .order_by(LLMConfig.is_default.desc())
                 .limit(1)
             )
             cfg_result = await self._db.execute(cfg_stmt)
@@ -263,6 +281,11 @@ class GenerationService:
         llm_model: str | None = None,
     ) -> None:
         """Drive the real SynthFlow engine. Fails loudly if the engine can't run."""
+        # Track the last phase/progress so error_callback can report the failed phase.
+        # Defined outside the try block so the except clause can always reference them.
+        last_phase: list[int] = [0]
+        last_progress: list[float] = [0.0]
+
         try:
             await self._update_status(db, generation_id, "running")
 
@@ -274,12 +297,20 @@ class GenerationService:
                 )
                 await self._update_status(db, generation_id, "failed", error_message=msg)
                 if error_callback:
-                    error_callback(generation_id, msg)
+                    error_callback(generation_id, msg, 0, 0.0)
                 return
+
+            orig_phase_cb = phase_callback
+
+            def tracking_phase_cb(phase: int, progress: float, message: str) -> None:
+                last_phase[0] = phase
+                last_progress[0] = progress
+                if orig_phase_cb:
+                    orig_phase_cb(phase, progress, message)
 
             await self._run_real_engine(
                 db, generation_id, session_id, prompt, options,
-                phase_callback, done_callback,
+                tracking_phase_cb, done_callback,
                 llm_provider, llm_api_key, llm_model,
             )
 
@@ -299,7 +330,7 @@ class GenerationService:
             except Exception as db_exc:
                 logger.error("Could not update failed status for %s: %s", generation_id, db_exc)
             if error_callback:
-                error_callback(generation_id, error_msg)
+                error_callback(generation_id, error_msg, last_phase[0], last_progress[0])
 
     async def _run_real_engine(
         self,
@@ -392,7 +423,9 @@ class GenerationService:
                 preview_df = df.head(10).copy()
                 for col in preview_df.columns:
                     preview_df[col] = preview_df[col].apply(_make_json_safe)
-                preview_rows = preview_df.to_dict(orient="records")
+                raw_rows = preview_df.to_dict(orient="records")
+                # Final sweep: catch any NaN/Infinity that slipped through
+                preview_rows = _sanitize_for_json(raw_rows)
                 col_count = len(df.columns)
             except Exception as df_exc:
                 logger.warning("Could not extract preview rows: %s", df_exc)

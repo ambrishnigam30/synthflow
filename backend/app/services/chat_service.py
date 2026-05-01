@@ -107,6 +107,7 @@ class ChatService:
             stmt = (
                 select(LLMConfig)
                 .where(LLMConfig.user_id == user_id, LLMConfig.is_active == True)  # noqa: E712
+                .order_by(LLMConfig.is_default.desc())
                 .limit(1)
             )
             result = await self._db.execute(stmt)

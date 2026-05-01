@@ -140,22 +140,51 @@ async def websocket_chat(
 
                     def done_cb(gen_id: str, result: dict) -> None:
                         import asyncio
-                        asyncio.create_task(
-                            websocket.send_json({
-                                "type": "generation_done",
-                                "generation_id": gen_id,
-                                "quality_score": result.get("quality_score", 0.0),
-                                "preview_rows": result.get("preview_rows", []),
-                                "row_count": result.get("row_count", 0),
-                                "col_count": result.get("col_count", 0),
-                                "domain": result.get("domain", ""),
-                                "schema": result.get("schema", {}),
-                                "download_urls": result.get(
-                                    "download_urls",
-                                    {"csv": "", "excel": "", "json": "", "parquet": ""},
-                                ),
-                            })
+                        payload = {
+                            "type": "generation_done",
+                            "generation_id": gen_id,
+                            "quality_score": result.get("quality_score", 0.0),
+                            "preview_rows": result.get("preview_rows", []),
+                            "row_count": result.get("row_count", 0),
+                            "col_count": result.get("col_count", 0),
+                            "domain": result.get("domain", ""),
+                            "schema": result.get("schema", {}),
+                            "download_urls": result.get(
+                                "download_urls",
+                                {"csv": "", "excel": "", "json": "", "parquet": ""},
+                            ),
+                        }
+                        # Use send_text with a manually serialized string so that
+                        # any NaN/Infinity values (invalid JSON) are replaced with null.
+                        safe_json = (
+                            json.dumps(payload, default=str)
+                            .replace(": NaN", ": null").replace(":NaN", ":null")
+                            .replace(": Infinity", ": null").replace(":Infinity", ":null")
+                            .replace(": -Infinity", ": null").replace(":-Infinity", ":null")
                         )
+                        asyncio.create_task(websocket.send_text(safe_json))
+
+                    def error_cb(gen_id: str, error_msg: str, phase: int, progress: float) -> None:
+                        import asyncio
+
+                        async def _send_failure() -> None:
+                            try:
+                                if phase > 0:
+                                    await websocket.send_json({
+                                        "type": "phase_update",
+                                        "phase": phase,
+                                        "progress": round(progress, 3),
+                                        "message": f"Failed: {error_msg}",
+                                        "status": "failed",
+                                    })
+                                await websocket.send_json({
+                                    "type": "error",
+                                    "message": error_msg,
+                                })
+                            except Exception:
+                                pass
+
+                        asyncio.create_task(_send_failure())
 
                     generation_id = await gen_svc.trigger_generation(
                         prompt=content,
@@ -164,6 +193,7 @@ async def websocket_chat(
                         options=options,
                         phase_callback=phase_cb,
                         done_callback=done_cb,
+                        error_callback=error_cb,
                     )
                     await websocket.send_json({
                         "type": "generation_start",

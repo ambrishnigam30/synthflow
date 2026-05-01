@@ -101,7 +101,7 @@ class SynthFlowOrchestrator:
                     _LOG.debug("Progress callback error (ignored): %s", cb_exc)
 
         # ── Phase 1: INTENT ────────────────────────────────────────────────
-        await _progress(1, 0.05, "Parsing intent from prompt…")
+        await _progress(1, 0.05, "Analyzing your request…")
         try:
             intent: IntentObject = await c.intent_engine.parse(prompt)
         except LLMConfigError:
@@ -123,9 +123,17 @@ class SynthFlowOrchestrator:
             session_id, intent.domain, effective_row_count, effective_seed,
         )
 
+        _intent_region = (
+            getattr(intent.region, "country", "Global") if intent.region else "Global"
+        )
+        await _progress(
+            1, 0.10,
+            f"Domain: {intent.domain}, Region: {_intent_region}, Rows: {effective_row_count:,}",
+        )
+
         # ── Phase 2: KNOWLEDGE ─────────────────────────────────────────────
         await asyncio.sleep(5)  # Rate-limit guard between LLM phases
-        await _progress(2, 0.15, "Activating domain knowledge graph…")
+        await _progress(2, 0.15, "Extracting domain knowledge…")
         try:
             knowledge: CausalKnowledgeBundle = await c.knowledge_graph.activate(intent)
         except LLMConfigError:
@@ -134,9 +142,14 @@ class SynthFlowOrchestrator:
             _LOG.error("Phase 2 (KNOWLEDGE) failed: %s", exc)
             raise OrchestrationError(str(exc)) from exc
 
+        await _progress(
+            2, 0.20,
+            f"Learning {intent.domain} patterns and causal rules",
+        )
+
         # ── Phase 3: SCHEMA ────────────────────────────────────────────────
         await asyncio.sleep(5)  # Rate-limit guard between LLM phases
-        await _progress(3, 0.25, "Designing table schema…")
+        await _progress(3, 0.25, "Designing data schema…")
         try:
             schema: SchemaDefinition = await c.schema_intelligence.architect(intent, knowledge)
         except LLMConfigError:
@@ -145,9 +158,15 @@ class SynthFlowOrchestrator:
             _LOG.error("Phase 3 (SCHEMA) failed: %s", exc)
             raise OrchestrationError(str(exc)) from exc
 
+        _col_count = sum(len(t.columns) for t in schema.tables) if schema.tables else 0
+        await _progress(
+            3, 0.30,
+            f"Schema ready: {_col_count} columns across {len(schema.tables)} table(s)",
+        )
+
         # ── Phase 4: CONSTRAINTS ───────────────────────────────────────────
         await asyncio.sleep(5)  # Rate-limit guard between LLM phases
-        await _progress(4, 0.35, "Building constraint physics set…")
+        await _progress(4, 0.35, "Mapping causal constraints…")
         try:
             constraints: ConstraintSet = await c.constraint_engine.build_constraint_set(
                 schema, knowledge
@@ -158,8 +177,13 @@ class SynthFlowOrchestrator:
             _LOG.warning("Phase 4 (CONSTRAINTS) failed: %s — using empty constraint set", exc)
             constraints = ConstraintSet(rules=[], domain=knowledge.domain)
 
+        await _progress(
+            4, 0.40,
+            f"Applied {len(constraints.rules)} constraint rules",
+        )
+
         # ── Phase 5: STATISTICS ────────────────────────────────────────────
-        await _progress(5, 0.45, "Modelling statistical distributions…")
+        await _progress(5, 0.45, "Modeling statistical distributions…")
         try:
             distributions: DistributionMap = c.stats_engine.model(schema, knowledge)
         except Exception as exc:
@@ -169,9 +193,14 @@ class SynthFlowOrchestrator:
                 table_name=schema.tables[0].name if schema.tables else "",
             )
 
+        await _progress(
+            5, 0.50,
+            f"Distributions mapped for {len(distributions.column_distributions)} columns",
+        )
+
         # ── Phase 6: GENERATION ────────────────────────────────────────────
         await asyncio.sleep(5)  # Rate-limit guard before code synthesis LLM call
-        await _progress(6, 0.60, "Synthesising data via Glass Box code…")
+        await _progress(6, 0.60, "Synthesizing Glass Box code…")
         df: pd.DataFrame = pd.DataFrame()
         generated_code: str = ""
         try:
@@ -204,8 +233,13 @@ class SynthFlowOrchestrator:
             _LOG.error("Phase 6 (GENERATION) failed: %s", exc)
             raise OrchestrationError(str(exc)) from exc
 
+        await _progress(
+            6, 0.65,
+            f"Generated {len(df):,} rows with self-healing execution",
+        )
+
         # ── Phase 7: PATTERNS ──────────────────────────────────────────────
-        await _progress(7, 0.70, "Applying temporal patterns and autocorrelation…")
+        await _progress(7, 0.70, "Applying temporal rhythms and autocorrelation…")
         try:
             # Identify timestamp columns
             ts_cols = [
@@ -229,6 +263,8 @@ class SynthFlowOrchestrator:
         except Exception as exc:
             _LOG.warning("Phase 7 (PATTERNS) failed: %s — skipping pattern application", exc)
 
+        await _progress(7, 0.75, "Temporal patterns and correlations applied")
+
         # Apply scenario shifts if requested
         if scenario_text:
             try:
@@ -243,7 +279,7 @@ class SynthFlowOrchestrator:
         seed_df = df.copy()
 
         # ── Phase 8: VALIDATION ────────────────────────────────────────────
-        await _progress(8, 0.85, "Validating, scanning for PII, computing quality…")
+        await _progress(8, 0.85, "Validating quality and scanning for PII…")
         validation_report: Optional[ValidationReport] = None
         try:
             validation_report = c.validation_engine.audit(
@@ -275,8 +311,13 @@ class SynthFlowOrchestrator:
             from synthflow.models.schemas import QualityReport
             quality_report = QualityReport(overall_score=75.0)
 
+        await _progress(
+            8, 0.90,
+            f"Quality score: {quality_report.overall_score:.1f}/100",
+        )
+
         # ── Phase 9: ANOMALY / DIRTY DATA / SDV / DRIFT ────────────────────
-        await _progress(9, 0.95, "Applying dirty data, SDV scaling, drift correction…")
+        await _progress(9, 0.95, "Finalizing output…")
         actual_correlations: dict[tuple[str, str], float] = {}
         try:
             if enable_dirty_data and knowledge.dirty_data_profile:

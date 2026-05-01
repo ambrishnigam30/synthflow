@@ -344,9 +344,17 @@ function ChatThread({
               msg={msg}
               onRetry={msg.isError && msg.retryPrompt ? () => onRetry(msg.retryPrompt!) : undefined}
             />
-            {gen && gen.status === "generating" && (
+            {gen &&
+              (gen.status === "generating" ||
+                (gen.status === "error" && gen.failedPhase !== undefined)) && (
               <div className="mt-3 ml-0">
-                <PhaseProgress phases={gen.phases} progress={gen.progress} />
+                <PhaseProgress
+                  phases={gen.phases}
+                  progress={gen.progress}
+                  isFailed={gen.failedPhase !== undefined}
+                  failedMessage={gen.failedMessage}
+                  onRetry={gen.prompt ? () => onRetry(gen.prompt) : undefined}
+                />
               </div>
             )}
             {gen && gen.status === "done" && gen.result && (
@@ -364,8 +372,20 @@ function ChatThread({
           <div>
             {(() => {
               const gen = generations.find((g) => g.id === activeGenerationId);
-              if (!gen || gen.status !== "generating") return null;
-              return <PhaseProgress phases={gen.phases} progress={gen.progress} />;
+              if (
+                !gen ||
+                (gen.status !== "generating" && gen.failedPhase === undefined)
+              )
+                return null;
+              return (
+                <PhaseProgress
+                  phases={gen.phases}
+                  progress={gen.progress}
+                  isFailed={gen.failedPhase !== undefined}
+                  failedMessage={gen.failedMessage}
+                  onRetry={gen.prompt ? () => onRetry(gen.prompt) : undefined}
+                />
+              );
             })()}
           </div>
         )}
@@ -507,6 +527,7 @@ function GenerateInner() {
     startGeneration,
     setPhase,
     setProgress,
+    setFailedPhase,
     setResult,
     setError,
   } = useGenerationStore();
@@ -622,10 +643,14 @@ function GenerateInner() {
           generationId: genId,
         });
       },
-      onPhaseUpdate: (phase, progress) => {
+      onPhaseUpdate: (phase, progress, message, status) => {
         if (pendingGenIdRef.current) {
-          setPhase(pendingGenIdRef.current, phase);
-          setProgress(pendingGenIdRef.current, progress);
+          if (status === "failed") {
+            setFailedPhase(pendingGenIdRef.current, phase, message);
+          } else {
+            setPhase(pendingGenIdRef.current, phase);
+            setProgress(pendingGenIdRef.current, progress);
+          }
         }
       },
       onGenerationDone: (payload: WsGenerationDone) => {
