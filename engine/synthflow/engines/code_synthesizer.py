@@ -118,7 +118,7 @@ class GlassBoxCodeSynthesizer:
         causal_order = knowledge.causal_generation_order or []
 
         value_pools_info = "\n".join(
-            f"  {pool.column_name}: {pool.values[:20]}"
+            f"  {pool.used_in_column}: {pool.values[:20]}"
             for pool in knowledge.real_world_value_pools[:10]
         ) if knowledge.real_world_value_pools else "  (no value pools provided)"
 
