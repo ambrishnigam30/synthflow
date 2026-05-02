@@ -420,7 +420,8 @@ class GenerationService:
         col_count: int = 0
         if df is not None and hasattr(df, "head"):
             try:
-                preview_df = df.head(10).copy()
+                _preview_size = min(100, len(df))
+                preview_df = df.head(_preview_size).copy()
                 for col in preview_df.columns:
                     preview_df[col] = preview_df[col].apply(_make_json_safe)
                 raw_rows = preview_df.to_dict(orient="records")
@@ -473,7 +474,12 @@ class GenerationService:
                 "col_count": col_count,
                 "domain": domain or "",
                 "schema": schema_dict,
-                "download_urls": {"csv": "", "excel": "", "json": "", "parquet": ""},
+                "download_urls": {
+                    "csv": f"/api/generate/{generation_id}/download?fmt=csv",
+                    "excel": f"/api/generate/{generation_id}/download?fmt=xlsx",
+                    "json": f"/api/generate/{generation_id}/download?fmt=json",
+                    "parquet": f"/api/generate/{generation_id}/download?fmt=parquet",
+                },
             })
 
     async def _update_status(

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -128,7 +128,10 @@ async def download_generation(
     fmt: str = Query("csv", pattern="^(csv|parquet|json|xlsx)$"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
+) -> StreamingResponse:
+    import io
+    import pandas as _pd
+
     svc = GenerationService(db)
     gen = await svc.get_generation(generation_id, user.id)
     if gen is None:
@@ -141,9 +144,84 @@ async def download_generation(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"message": "Generation not complete yet.", "code": "NOT_READY"},
         )
-    # Redirect to Supabase signed URL (placeholder for test env)
-    signed_url = gen.storage_path or f"/static/generations/{generation_id}.{fmt}"
-    return RedirectResponse(url=signed_url, status_code=302)
+    if not gen.glass_box_code:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "Glass Box code not available for this generation.", "code": "NO_CODE"},
+        )
+
+    # Compile and execute the glass_box_code safely to regenerate the DataFrame
+    _ns: dict = {}
+    try:
+        exec(compile(gen.glass_box_code, "<glass_box>", "exec"), _ns)  # nosec B102
+    except Exception as exc:
+        logger.error("Failed to compile glass_box_code for %s: %s", generation_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"message": "Could not compile generation code.", "code": "CODE_ERROR"},
+        ) from exc
+
+    _generate_fn = _ns.get("generate")
+    if not callable(_generate_fn):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"message": "Glass Box code has no generate() function.", "code": "CODE_ERROR"},
+        )
+
+    _intent = gen.intent_json or {}
+    _seed = int(_intent.get("seed", 42))
+    _row_count = gen.row_count or 100
+
+    try:
+        df = _generate_fn(_row_count, _seed)
+    except Exception as exc:
+        logger.error("Failed to execute glass_box_code for %s: %s", generation_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"message": "Could not execute generation code.", "code": "CODE_ERROR"},
+        ) from exc
+
+    if not isinstance(df, _pd.DataFrame):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"message": "Glass Box code did not return a DataFrame.", "code": "CODE_ERROR"},
+        )
+
+    filename = f"dataset_{generation_id[:8]}"
+    buf = io.BytesIO()
+
+    if fmt == "csv":
+        df.to_csv(buf, index=False)
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
+        )
+    elif fmt == "json":
+        df.to_json(buf, orient="records", force_ascii=False)
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}.json"'},
+        )
+    elif fmt == "parquet":
+        df.to_parquet(buf, index=False)
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{filename}.parquet"'},
+        )
+    else:  # xlsx
+        df.to_excel(buf, index=False, engine="openpyxl")
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
+        )
 
 
 @router.get("/{generation_id}/code")

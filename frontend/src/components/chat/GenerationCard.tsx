@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Download, ChevronDown, ChevronRight } from "lucide-react";
+import { Download, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react";
 import type { GenerationResult } from "@/lib/stores/generationStore";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -71,76 +71,138 @@ function Section({
   );
 }
 
-// ── Mini data table ───────────────────────────────────────────────────────────
+// ── Mini data table with pagination ──────────────────────────────────────────
+
+const ROWS_PER_PAGE = 10;
 
 function PreviewTable({ rows }: { rows: Record<string, unknown>[] }) {
+  const [page, setPage] = useState(0);
   if (!rows.length) return null;
+
   const cols = Object.keys(rows[0]);
-  const displayCols = cols.slice(0, 6);
-  const displayRows = rows.slice(0, 10);
+  const totalPages = Math.ceil(rows.length / ROWS_PER_PAGE);
+  const pageRows = rows.slice(page * ROWS_PER_PAGE, (page + 1) * ROWS_PER_PAGE);
 
   return (
-    <div className="overflow-x-auto rounded-[6px]" style={{ border: "1px solid rgba(38,37,30,0.08)" }}>
-      <table className="w-full" style={{ borderCollapse: "collapse", minWidth: "100%" }}>
-        <thead>
-          <tr style={{ background: "#f7f7f4", borderBottom: "1px solid rgba(38,37,30,0.1)" }}>
-            {displayCols.map((col) => (
-              <th
-                key={col}
+    <div>
+      {/* Scrollable table — all columns, horizontal scroll for wide datasets */}
+      <div style={{ overflowX: "auto", maxWidth: "100%", borderRadius: "6px", border: "1px solid rgba(38,37,30,0.08)" }}>
+        <table style={{ borderCollapse: "collapse", minWidth: "100%", whiteSpace: "nowrap" }}>
+          <thead>
+            <tr style={{ background: "#f7f7f4", borderBottom: "1px solid rgba(38,37,30,0.1)" }}>
+              {cols.map((col) => (
+                <th
+                  key={col}
+                  style={{
+                    fontFamily: "system-ui",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    color: "rgba(38,37,30,0.55)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.048px",
+                    padding: "8px 10px",
+                    textAlign: "left",
+                    minWidth: "100px",
+                  }}
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {pageRows.map((row, i) => (
+              <tr
+                key={i}
                 style={{
-                  fontFamily: "system-ui",
-                  fontSize: "11px",
-                  fontWeight: 600,
-                  color: "rgba(38,37,30,0.55)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.048px",
-                  padding: "8px 10px",
-                  textAlign: "left",
-                  whiteSpace: "nowrap",
+                  borderBottom:
+                    i < pageRows.length - 1
+                      ? "1px solid rgba(38,37,30,0.06)"
+                      : "none",
                 }}
               >
-                {col}
-              </th>
+                {cols.map((col) => {
+                  const val = row[col];
+                  const isNum = typeof val === "number";
+                  return (
+                    <td
+                      key={col}
+                      style={{
+                        fontFamily: isNum ? "var(--font-mono, monospace)" : "var(--font-satoshi, system-ui, sans-serif)",
+                        fontSize: isNum ? "12px" : "13px",
+                        fontVariantNumeric: isNum ? "tabular-nums" : undefined,
+                        color: "#26251e",
+                        padding: "7px 10px",
+                        maxWidth: "200px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {String(val ?? "")}
+                    </td>
+                  );
+                })}
+              </tr>
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {displayRows.map((row, i) => (
-            <tr
-              key={i}
-              style={{
-                borderBottom:
-                  i < displayRows.length - 1
-                    ? "1px solid rgba(38,37,30,0.06)"
-                    : "none",
-              }}
-            >
-              {displayCols.map((col) => {
-                const val = row[col];
-                const isNum = typeof val === "number";
-                return (
-                  <td
-                    key={col}
-                    style={{
-                      fontFamily: isNum ? "var(--font-mono, monospace)" : "var(--font-satoshi, system-ui, sans-serif)",
-                      fontSize: isNum ? "12px" : "13px",
-                      fontVariantNumeric: isNum ? "tabular-nums" : undefined,
-                      color: "#26251e",
-                      padding: "7px 10px",
-                      whiteSpace: "nowrap",
-                      maxWidth: "160px",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {String(val ?? "")}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination controls */}
+      {totalPages > 1 && (
+        <div
+          className="flex items-center justify-between mt-2"
+          style={{ paddingTop: "8px" }}
+        >
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="flex items-center gap-1"
+            style={{
+              background: "none",
+              border: "1px solid rgba(38,37,30,0.15)",
+              borderRadius: "6px",
+              padding: "4px 10px",
+              cursor: page === 0 ? "not-allowed" : "pointer",
+              opacity: page === 0 ? 0.4 : 1,
+              fontFamily: "system-ui",
+              fontSize: "12px",
+              color: "#26251e",
+            }}
+          >
+            <ChevronLeft size={12} strokeWidth={1.5} />
+            Prev
+          </button>
+          <span
+            style={{
+              fontFamily: "system-ui",
+              fontSize: "12px",
+              color: "rgba(38,37,30,0.5)",
+            }}
+          >
+            Page {page + 1} of {totalPages}
+          </span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            disabled={page === totalPages - 1}
+            className="flex items-center gap-1"
+            style={{
+              background: "none",
+              border: "1px solid rgba(38,37,30,0.15)",
+              borderRadius: "6px",
+              padding: "4px 10px",
+              cursor: page === totalPages - 1 ? "not-allowed" : "pointer",
+              opacity: page === totalPages - 1 ? 0.4 : 1,
+              fontFamily: "system-ui",
+              fontSize: "12px",
+              color: "#26251e",
+            }}
+          >
+            Next
+            <ChevronRight size={12} strokeWidth={1.5} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -149,38 +211,71 @@ function PreviewTable({ rows }: { rows: Record<string, unknown>[] }) {
 
 function DownloadBtn({
   label,
-  href,
+  generationId,
+  fmt,
+  ext,
 }: {
   label: string;
-  href: string;
+  generationId: string;
+  fmt: string;
+  ext: string;
 }) {
+  const [loading, setLoading] = useState(false);
+
+  const handleDownload = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const token =
+        (typeof localStorage !== "undefined" && localStorage.getItem("token")) ||
+        (typeof sessionStorage !== "undefined" && sessionStorage.getItem("token")) ||
+        "";
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+      const response = await fetch(
+        `${apiUrl}/api/generate/${generationId}/download?fmt=${fmt}`,
+        token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+      );
+      if (!response.ok) return;
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `dataset_${generationId.slice(0, 8)}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <a
-      href={href}
-      download
-      className="flex items-center gap-1.5 transition-opacity hover:opacity-80"
+    <button
+      onClick={handleDownload}
+      disabled={loading}
+      className="flex items-center gap-1.5"
       style={{
         background: "#ebeae5",
-        color: "#26251e",
+        color: loading ? "rgba(38,37,30,0.4)" : "#26251e",
         border: "none",
         borderRadius: "6px",
         padding: "7px 12px",
         fontFamily: "var(--font-satoshi, system-ui, sans-serif)",
         fontSize: "13px",
         fontWeight: 400,
-        textDecoration: "none",
-        cursor: "pointer",
+        cursor: loading ? "wait" : "pointer",
       }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLElement).style.color = "#cf2d56";
+        if (!loading) (e.currentTarget as HTMLElement).style.color = "#cf2d56";
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.color = "#26251e";
+        if (!loading) (e.currentTarget as HTMLElement).style.color = "#26251e";
       }}
     >
       <Download size={13} strokeWidth={1.5} />
-      {label}
-    </a>
+      {loading ? "…" : label}
+    </button>
   );
 }
 
@@ -238,12 +333,12 @@ interface GenerationCardProps {
 
 export default function GenerationCard({ result }: GenerationCardProps) {
   const {
+    generationId,
     qualityScore,
     rowCount,
     colCount,
     domain,
     previewRows,
-    downloadUrls,
     generatedCode,
     qualityReport,
     schema,
@@ -341,14 +436,14 @@ export default function GenerationCard({ result }: GenerationCardProps) {
         className="px-4 py-3 flex flex-wrap gap-2"
         style={{ borderTop: "1px solid rgba(38,37,30,0.08)", background: "#fafaf8" }}
       >
-        <DownloadBtn label="CSV" href={downloadUrls.csv} />
-        <DownloadBtn label="Excel" href={downloadUrls.excel} />
-        <DownloadBtn label="JSON" href={downloadUrls.json} />
-        <DownloadBtn label="Parquet" href={downloadUrls.parquet} />
+        <DownloadBtn label="CSV" generationId={generationId} fmt="csv" ext="csv" />
+        <DownloadBtn label="Excel" generationId={generationId} fmt="xlsx" ext="xlsx" />
+        <DownloadBtn label="JSON" generationId={generationId} fmt="json" ext="json" />
+        <DownloadBtn label="Parquet" generationId={generationId} fmt="parquet" ext="parquet" />
       </div>
 
       {/* Expandable sections */}
-      <Section label="Data Preview (10 rows)" defaultOpen>
+      <Section label={`Data Preview (${previewRows.length} rows × ${colCount} cols)`} defaultOpen>
         <PreviewTable rows={previewRows} />
       </Section>
 

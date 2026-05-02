@@ -279,16 +279,35 @@ class SynthFlowOrchestrator:
         try:
             import re as _re
             _placeholder_pattern = _re.compile(r"^[a-zA-Z]+_\d+$")
+
+            # Build schema column-type lookup for smart UUID detection
+            _pg_schema_types: dict[str, str] = {}
+            _pg_table = schema.tables[0] if schema.tables else None
+            if _pg_table:
+                for _sc in _pg_table.columns:
+                    _pg_schema_types[_sc.name] = (_sc.data_type or "").lower()
+
             for col in df.select_dtypes(include=["object", "str"]).columns:
                 _sample = df[col].dropna().astype(str)
                 if len(_sample) > 0:
                     _pct = _sample.apply(lambda v: bool(_placeholder_pattern.match(v))).mean()
                     if _pct > 0.30:
-                        _LOG.warning(
-                            "Post-gen quality: column '%s' has %.0f%% placeholder-like values "
-                            "(e.g. word_0, category_1) — value pools may not have been embedded",
-                            col, _pct * 100,
-                        )
+                        _col_schema_type = _pg_schema_types.get(col, "")
+                        _is_uuid_col = "uuid" in col.lower() or _col_schema_type == "uuid"
+                        if _is_uuid_col:
+                            # Replace all placeholder values with real UUIDs
+                            df[col] = [str(uuid.uuid4()) for _ in range(len(df))]
+                            _LOG.info(
+                                "Post-gen fix: replaced %.0f%% placeholder values in UUID"
+                                " column '%s' with str(uuid.uuid4())",
+                                _pct * 100, col,
+                            )
+                        else:
+                            _LOG.warning(
+                                "Post-gen quality: column '%s' has %.0f%% placeholder-like values "
+                                "(e.g. word_0, category_1) — value pools may not have been embedded",
+                                col, _pct * 100,
+                            )
         except Exception as _exc:
             _LOG.warning("Post-gen placeholder check failed: %s", _exc)
 
@@ -316,6 +335,56 @@ class SynthFlowOrchestrator:
                                 )
         except Exception as _exc:
             _LOG.warning("Post-gen numeric range check failed: %s", _exc)
+
+        # ── Fix _id columns: negative values → abs, NaN → sequential/uuid4 ──
+        try:
+            import numpy as _np2
+            _id_table = schema.tables[0] if schema.tables else None
+            _id_schema_types: dict[str, str] = {}
+            if _id_table:
+                for _sc2 in _id_table.columns:
+                    _id_schema_types[_sc2.name] = (_sc2.data_type or "").lower()
+
+            for col in df.columns:
+                if "_id" not in col.lower():
+                    continue
+                _col_dt = _id_schema_types.get(col, "")
+                _series = df[col]
+
+                if _np2.issubdtype(_series.dtype, _np2.number):
+                    # Fix negative IDs → absolute value, cast to int
+                    _neg_count = int((_series < 0).sum())
+                    if _neg_count > 0:
+                        df[col] = _series.abs().astype(int)
+                        _LOG.info(
+                            "Post-gen fix: %d negative values in numeric ID column '%s' → abs()",
+                            _neg_count, col,
+                        )
+                    # Fix NaN in numeric IDs → fill with sequential integers from max+1
+                    _nan_count = int(df[col].isna().sum())
+                    if _nan_count > 0:
+                        _cur_max = int(df[col].dropna().max()) if len(df[col].dropna()) > 0 else 0
+                        _fill_vals = list(range(_cur_max + 1, _cur_max + 1 + _nan_count))
+                        _s_copy = df[col].copy()
+                        _s_copy[_s_copy.isna()] = _fill_vals
+                        df[col] = _s_copy.astype(int)
+                        _LOG.info(
+                            "Post-gen fix: %d NaN values in numeric ID column '%s' → sequential ints",
+                            _nan_count, col,
+                        )
+                elif _col_dt == "uuid":
+                    # Fix NaN in UUID ID columns → new uuid4
+                    _nan_count = int(_series.isna().sum())
+                    if _nan_count > 0:
+                        _s_copy2 = _series.copy().astype(object)
+                        _s_copy2[_s_copy2.isna()] = [str(uuid.uuid4()) for _ in range(_nan_count)]
+                        df[col] = _s_copy2
+                        _LOG.info(
+                            "Post-gen fix: %d NaN values in UUID ID column '%s' → uuid4",
+                            _nan_count, col,
+                        )
+        except Exception as _exc:
+            _LOG.warning("Post-gen ID column fix failed: %s", _exc)
 
         try:
             import pandas as _pd

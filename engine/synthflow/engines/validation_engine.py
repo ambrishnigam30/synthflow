@@ -102,6 +102,17 @@ class ValidationHygieneEngine:
             self._check_correlation_consistency(df, knowledge),
         ]
 
+        # Per-check debug logging — shows which checks drag the score down
+        for _chk in checks:
+            _LOG.debug(
+                "Check %s: %s — score=%.3f violations=%d — %s",
+                _chk.check_name,
+                "PASS" if _chk.passed else "FAIL",
+                _chk.score,
+                _chk.violations_found,
+                _chk.details or "",
+            )
+
         # Weighted overall score
         weights = [0.15, 0.15, 0.10, 0.12, 0.10, 0.10, 0.08, 0.08, 0.07, 0.05]
         overall = sum(w * c.score * 100 for w, c in zip(weights, checks))

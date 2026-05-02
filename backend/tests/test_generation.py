@@ -91,30 +91,42 @@ async def test_b003_02_get_generation_status(
 async def test_b003_03_download_completed_generation(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """B-003-03: Download completed generation → 302 redirect."""
+    """B-003-03: Download completed generation → 200 streaming CSV."""
     token, user_id = await _signup_get_token(client)
 
-    # Create a completed generation directly in DB (no background task — avoids race condition)
+    # Create a completed generation with glass_box_code directly in DB
     gen_id = str(uuid.uuid4())
+    glass_code = (
+        "import pandas as pd\n"
+        "def generate(row_count, seed):\n"
+        "    import numpy as np\n"
+        "    rng = np.random.default_rng(seed)\n"
+        "    return pd.DataFrame({'id': range(row_count), 'value': rng.integers(1, 100, row_count)})\n"
+    )
     gen = Generation(
         id=gen_id,
         user_id=user_id,
         session_id=str(uuid.uuid4()),
         status="done",
-        row_count=100,
+        row_count=10,
         quality_score=88.5,
         privacy_score=92.0,
+        glass_box_code=glass_code,
     )
     db_session.add(gen)
     await db_session.commit()
 
     resp = await client.get(
-        f"/api/generate/{gen_id}/download",
+        f"/api/generate/{gen_id}/download?fmt=csv",
         headers=_auth(token),
-        follow_redirects=False,
     )
-    assert resp.status_code == 302
-    assert resp.headers.get("location"), "Redirect must have a Location header"
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers.get("content-type", "")
+    assert "attachment" in resp.headers.get("content-disposition", "")
+    # Verify it's real CSV content with rows
+    content = resp.text
+    assert "id" in content
+    assert "value" in content
 
 
 async def test_b003_04_get_glass_box_code(
