@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(npm run *)",
+      "Bash(python -m pytest tests/test_stats_engine.py -v --tb=short)",
+      "Bash(python -m pytest tests/test_code_synthesizer.py -v --tb=short)",
+      "Bash(python -m pytest tests/ --collect-only -q)"
+    ]
+  }
+}

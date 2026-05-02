@@ -275,6 +275,95 @@ class SynthFlowOrchestrator:
             except Exception as exc:
                 _LOG.warning("Scenario application failed: %s — skipping", exc)
 
+        # ── Post-generation quality checks (warnings only, never fail pipeline) ──
+        try:
+            import re as _re
+            _placeholder_pattern = _re.compile(r"^[a-zA-Z]+_\d+$")
+            for col in df.select_dtypes(include=["object", "str"]).columns:
+                _sample = df[col].dropna().astype(str)
+                if len(_sample) > 0:
+                    _pct = _sample.apply(lambda v: bool(_placeholder_pattern.match(v))).mean()
+                    if _pct > 0.30:
+                        _LOG.warning(
+                            "Post-gen quality: column '%s' has %.0f%% placeholder-like values "
+                            "(e.g. word_0, category_1) — value pools may not have been embedded",
+                            col, _pct * 100,
+                        )
+        except Exception as _exc:
+            _LOG.warning("Post-gen placeholder check failed: %s", _exc)
+
+        try:
+            import numpy as _np
+            _table = schema.tables[0] if schema.tables else None
+            if _table:
+                for _col_def in _table.columns:
+                    _cname = _col_def.name
+                    if _cname not in df.columns:
+                        continue
+                    _mn, _mx = _col_def.min_value, _col_def.max_value
+                    if _mn is not None or _mx is not None:
+                        _series = df[_cname]
+                        if _np.issubdtype(_series.dtype, _np.number):
+                            _out_of_range = (
+                                (_series < _mn if _mn is not None else False) |
+                                (_series > _mx if _mx is not None else False)
+                            ).sum()
+                            if _out_of_range > 0:
+                                _LOG.warning(
+                                    "Post-gen quality: column '%s' has %d values outside "
+                                    "[%s, %s] — np.clip not applied in generated code",
+                                    _cname, _out_of_range, _mn, _mx,
+                                )
+        except Exception as _exc:
+            _LOG.warning("Post-gen numeric range check failed: %s", _exc)
+
+        try:
+            import pandas as _pd
+            _dob_col = next(
+                (c for c in df.columns if c in ("date_of_birth", "dob", "birth_date")), None
+            )
+            _age_col = next(
+                (c for c in df.columns if c in ("age", "age_years")), None
+            )
+            if _dob_col and _age_col and _pd.api.types.is_datetime64_any_dtype(df[_dob_col]):
+                _ref = _pd.Timestamp.now()
+                _computed_age = ((_ref - df[_dob_col]).dt.days / 365.25).astype(int)
+                _diff = (_computed_age - df[_age_col].fillna(0)).abs()
+                _inconsistent = (_diff > 2).sum()
+                if _inconsistent > 0:
+                    _LOG.warning(
+                        "Post-gen quality: %d rows have age/date_of_birth inconsistency "
+                        "(>2 year gap) — date consistency rule not applied in generated code",
+                        _inconsistent,
+                    )
+        except Exception as _exc:
+            _LOG.warning("Post-gen date consistency check failed: %s", _exc)
+
+        try:
+            import pandas as _pd2
+            _date_pairs = [
+                ("admission_date", "discharge_date"),
+                ("purchase_date", "delivery_date"),
+                ("order_date", "ship_date"),
+                ("start_date", "end_date"),
+                ("created_at", "updated_at"),
+            ]
+            for _before, _after in _date_pairs:
+                if _before in df.columns and _after in df.columns:
+                    if (
+                        _pd2.api.types.is_datetime64_any_dtype(df[_before])
+                        and _pd2.api.types.is_datetime64_any_dtype(df[_after])
+                    ):
+                        _violations = (df[_after] < df[_before]).sum()
+                        if _violations > 0:
+                            _LOG.warning(
+                                "Post-gen quality: %d rows have %s after %s — "
+                                "temporal ordering not enforced in generated code",
+                                _violations, _before, _after,
+                            )
+        except Exception as _exc:
+            _LOG.warning("Post-gen sequential date check failed: %s", _exc)
+
         # Keep a copy of the pre-dirty DataFrame for quality comparison
         seed_df = df.copy()
 

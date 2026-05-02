@@ -58,18 +58,8 @@ def test_stats_engine_duration_must_be_exponential() -> None:
 # ── model() ───────────────────────────────────────────────────────────────
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Known engine bug: _assign_distribution passes categorical params "
-        "{'weights': []} into DistributionSpec.params (dict[str, float]), "
-        "which raises a Pydantic validation error for any schema with string columns. "
-        "Fix: strip non-float values from params before constructing DistributionSpec, "
-        "or use a separate 'categorical_weights' field on DistributionSpec."
-    ),
-    strict=True,
-)
 def test_stats_engine_model_returns_distribution_map() -> None:
-    """model() on a mixed schema returns a DistributionMap (fails due to engine bug)."""
+    """model() on a mixed schema returns a DistributionMap."""
     from synthflow.models.schemas import (
         CausalKnowledgeBundle,
         ColumnDefinition,
@@ -91,12 +81,8 @@ def test_stats_engine_model_returns_distribution_map() -> None:
     assert hasattr(dist_map, "column_distributions")
 
 
-@pytest.mark.xfail(
-    reason="Same engine bug: string PK column triggers categorical path, fails Pydantic.",
-    strict=True,
-)
 def test_stats_engine_model_salary_column_is_lognormal() -> None:
-    """bill_amount with semantic_type='salary' is mapped to lognormal (fails due to engine bug)."""
+    """bill_amount with semantic_type='salary' is mapped to lognormal."""
     from synthflow.models.schemas import (
         CausalKnowledgeBundle,
         ColumnDefinition,
@@ -118,12 +104,8 @@ def test_stats_engine_model_salary_column_is_lognormal() -> None:
     assert bill_spec.distribution_type == "lognormal"
 
 
-@pytest.mark.xfail(
-    reason="Same engine bug: string PK column triggers categorical path, fails Pydantic.",
-    strict=True,
-)
 def test_stats_engine_model_age_column_is_truncated_normal() -> None:
-    """age column with semantic_type='age' is mapped to truncated_normal (fails due to engine bug)."""
+    """age column with semantic_type='age' is mapped to truncated_normal."""
     from synthflow.models.schemas import (
         CausalKnowledgeBundle,
         ColumnDefinition,
@@ -145,12 +127,8 @@ def test_stats_engine_model_age_column_is_truncated_normal() -> None:
     assert age_spec.distribution_type == "truncated_normal"
 
 
-@pytest.mark.xfail(
-    reason="Same engine bug: string PK column triggers categorical path, fails Pydantic.",
-    strict=True,
-)
 def test_stats_engine_model_covers_numeric_columns() -> None:
-    """DistributionMap covers all columns (fails due to engine bug)."""
+    """DistributionMap covers all columns."""
     from synthflow.models.schemas import (
         CausalKnowledgeBundle,
         ColumnDefinition,

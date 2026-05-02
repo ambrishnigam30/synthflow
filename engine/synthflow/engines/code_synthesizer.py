@@ -19,6 +19,7 @@ from synthflow.models.schemas import (
     DistributionMap,
     SchemaDefinition,
 )
+from synthflow.prompts.master_prompt import CODE_SYNTHESIS_RULES
 from synthflow.utils.helpers import safe_json_loads
 
 _SYNTHESIZER_SYSTEM_PROMPT = (
@@ -32,34 +33,7 @@ _SYNTHESIZER_SYSTEM_PROMPT = (
     "6. Include these imports at the top: import numpy as np; import pandas as pd; "
     "from typing import Optional\n\n"
     "DATA QUALITY MANDATORY RULES:\n"
-    "RULE 1 NO PLACEHOLDERS: Never generate values like name_0, category_1, treatment_2. "
-    "Use rng.choice(ENTITY_LIST, size=n) where ENTITY_LIST comes from the value pools provided. "
-    "Every string column must draw from a realistic list of at least 10 real values. "
-    "If no pool is provided, embed realistic domain-appropriate values as constants.\n"
-    "RULE 2 NUMERIC CONSTRAINTS: All numeric values must be within the schema min and max. "
-    "Use np.clip(generated_values, min_val, max_val). Age must be INTEGER never float — "
-    "use .astype(int). Credit scores are integer. Counts are integer.\n"
-    "RULE 3 DATE CONSISTENCY: If both date_of_birth and age columns exist, pick date_of_birth as "
-    "source of truth and compute age as: age = ((reference_date - dob).dt.days / 365.25).astype(int). "
-    "NEVER use pd.date_range with sequential daily intervals — use rng.integers to pick random offsets.\n"
-    "RULE 4 CAUSAL IMPLEMENTATION: Generate columns in the causal_generation_order provided. "
-    "Generate parent columns first, then condition children on parent values.\n"
-    "RULE 5 NAME GENDER GEOGRAPHY CORRELATION: Generate gender first. "
-    "Then select names appropriate for that gender AND region AND age bracket using the value pools. "
-    "Male names from male pool, female names from female pool. Use np.where or conditional indexing.\n"
-    "RULE 6 LOCATION VALUE CORRELATION: If location and economic columns both exist, "
-    "higher-tier cities get higher salaries and costs. Use a city-to-salary-multiplier dict.\n"
-    "RULE 7 REALISTIC DISTRIBUTIONS: Use the exact distribution type and parameters from the "
-    "knowledge bundle. rng.normal(mean, std, size=n) for continuous, "
-    "rng.choice(values, p=weights, size=n) for categorical.\n"
-    "RULE 8 NULL INJECTION: Follow the dirty_data_profile. Inject nulls causally not randomly. "
-    "Example: mask = (df['age'] > 65) & (rng.random(n) < 0.40); df.loc[mask, 'email'] = None\n"
-    "RULE 9 TEMPORAL RHYTHMS: Use day_of_week_weights and hour_of_day_weights from knowledge "
-    "bundle when generating timestamps. Sample days proportionally.\n"
-    "RULE 10 STATE MACHINE: Enforce valid transitions and temporal ordering. "
-    "discharge_date must always be after admission_date. "
-    "delivery_date must always be after purchase_date. "
-    "Compute derived dates as: derived = base_date + pd.to_timedelta(rng.exponential(scale=X, size=n), unit='D')"
+    + CODE_SYNTHESIS_RULES
 )
 
 _SYNTHESIZER_USER_TEMPLATE = (
@@ -141,6 +115,13 @@ class GlassBoxCodeSynthesizer:
             for col, spec in list(distributions.column_distributions.items())[:10]
         }
 
+        causal_order = knowledge.causal_generation_order or []
+
+        value_pools_info = "\n".join(
+            f"  {pool.column_name}: {pool.values[:20]}"
+            for pool in knowledge.real_world_value_pools[:10]
+        ) if knowledge.real_world_value_pools else "  (no value pools provided)"
+
         user = _SYNTHESIZER_USER_TEMPLATE.format(
             table_name=table.name,
             columns=columns_info[:15],
@@ -149,6 +130,8 @@ class GlassBoxCodeSynthesizer:
             seed=seed,
             dist_hints=dist_hints,
             dag_rules=dag_rules_info,
+            causal_order=causal_order,
+            value_pools=value_pools_info,
         )
 
         try:
