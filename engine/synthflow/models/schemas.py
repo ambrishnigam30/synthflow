@@ -274,6 +274,15 @@ class NameCulturalPatterns(SynthFlowBase):
     middle_name_probability: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
+# 13b — ValuePool: a named list of 20 real-world verified values for entity columns
+class ValuePool(SynthFlowBase):
+    pool_name: str = Field(description="e.g. 'male_first_names_north_india'")
+    used_in_column: str = Field(description="Column name this pool populates")
+    cultural_context: Optional[str] = Field(default=None, description="Cultural context description")
+    verification_basis: Optional[str] = Field(default=None, description="Source for these values")
+    values: list[str] = Field(default_factory=list, description="Exactly 20 real verified values")
+
+
 # ══════════════════════════════════════════════════════════════════════
 # Model 14: CausalKnowledgeBundle — extra="allow"
 # ══════════════════════════════════════════════════════════════════════
@@ -295,6 +304,39 @@ class CausalKnowledgeBundle(SynthFlowBase):
     name_patterns: Optional[NameCulturalPatterns] = Field(default=None)
     currency_code: str = Field(default="INR")
     locale: Optional[LocaleInfo] = Field(default=None)
+    # ── New fields from master prompt (all Optional for backward compatibility) ──
+    real_world_value_pools: list[ValuePool] = Field(
+        default_factory=list,
+        description="Real-world value pools from master prompt (20 verified values each)",
+    )
+    causal_generation_order: list[str] = Field(
+        default_factory=list,
+        description="Topological sort of column names — generation order",
+    )
+    column_design: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Full column design from master prompt LLM response",
+    )
+    geography: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Geography dict: country, state, city, currency, locale, etc.",
+    )
+    institutions: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Real institutions with name, website, tier, used_in_column",
+    )
+    simulation_rules: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="State machine, genesis event, time deltas, privacy boundaries",
+    )
+    dirty_data_profile_extended: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Per-column dirty data profile from master prompt",
+    )
+    blueprint_metadata: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Blueprint metadata from master prompt",
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -389,7 +431,11 @@ class ConstraintSet(SynthFlowBase):
 # 21
 class DistributionSpec(SynthFlowBase):
     distribution_type: str = Field(description="normal|lognormal|uniform|truncated_normal|categorical|…")
-    params: dict[str, float] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Distribution parameters — scalar floats for continuous; "
+                    "lists allowed for categorical (weights: list[float], values: list[Any])",
+    )
     clip_min: Optional[float] = Field(default=None)
     clip_max: Optional[float] = Field(default=None)
     weights: Optional[list[float]] = Field(default=None, description="Mixture weights")

@@ -11,6 +11,8 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional, Union
 
+
+
 from synthflow.causal_dag import CausalDAG
 from synthflow.llm_client import LLMClient, MockLLMClient
 from synthflow.models.schemas import (
@@ -36,19 +38,28 @@ _SCHEMA_SYSTEM_PROMPT = (
     "2. Always include at least one primary key column (UUID)\n"
     "3. Column ordering: IDs → demographics → measures → metadata\n"
     "4. Infer FK relationships where logical\n"
-    "5. Return ONLY valid JSON"
+    "5. Return ONLY valid JSON\n"
+    "6. Every numeric column MUST have realistic min_value and max_value constraints\n"
+    "7. Age is always INTEGER data_type with min_value=0 and max_value=100\n"
+    "8. Monetary columns are FLOAT data_type with 2 decimal precision implied\n"
+    "9. String columns representing categories MUST include enum_values with real domain values\n"
+    "10. If both date_of_birth and age columns exist, mark age as computed (add note in description)\n"
+    "11. Data types must be precise: use integer for counts/ages, float for continuous measures, "
+    "string for text/codes, datetime for timestamps, date for calendar dates, uuid for IDs\n"
+    "12. Primary key column must use uuid data_type and unique=true and nullable=false"
 )
 
 _SCHEMA_USER_TEMPLATE = (
     "Design a schema for: domain='{domain}', region='{region}', row_count={row_count}.\n"
     "Implied columns hint: {implied}.\n"
+    "{column_design_hint}"
     "Return JSON: {{\"table_name\": string, \"columns\": [{{\"name\": string, "
     "\"data_type\": string, \"semantic_type\": string, \"is_primary_key\": bool, "
     "\"nullable\": bool, \"null_rate\": float, \"min_value\": number|null, "
     "\"max_value\": number|null, \"enum_values\": list, \"unique\": bool, "
     "\"description\": string}}]}}\n"
     "data_type must be one of: string, integer, float, boolean, datetime, date, json, uuid\n"
-    "Ensure at least 12 columns."
+    "Ensure at least 12 columns. Every numeric column must have min_value and max_value."
 )
 
 # Minimum required columns when LLM returns too few
@@ -91,15 +102,39 @@ class SchemaIntelligenceLayer:
         intent: IntentObject,
         knowledge: CausalKnowledgeBundle,
     ) -> SchemaDefinition:
+        # If the master prompt already returned a column_design, use it directly
+        # to avoid an extra LLM round-trip and improve quality consistency.
+        if knowledge.column_design:
+            try:
+                return self._build_from_column_design(knowledge.column_design, intent)
+            except Exception as exc:
+                _LOG.warning(
+                    "column_design from knowledge bundle unusable (%s) — falling back to LLM", exc
+                )
+
         region_str = (
             intent.region.country if intent.region else "global"
         )
         implied = ", ".join(intent.implied_columns) if intent.implied_columns else "auto"
+
+        # Build optional hint from column_design if partially parseable
+        column_design_hint = ""
+        if knowledge.column_design:
+            col_names = [
+                c.get("column_name", "") for c in knowledge.column_design
+                if isinstance(c, dict) and c.get("column_name")
+            ]
+            if col_names:
+                column_design_hint = (
+                    f"Use these columns from domain knowledge analysis: {', '.join(col_names)}.\n"
+                )
+
         user = _SCHEMA_USER_TEMPLATE.format(
             domain=intent.domain,
             region=region_str,
             row_count=intent.row_count,
             implied=implied,
+            column_design_hint=column_design_hint,
         )
         try:
             raw = await self._llm.complete(
@@ -107,7 +142,7 @@ class SchemaIntelligenceLayer:
                 system_prompt=_SCHEMA_SYSTEM_PROMPT,
                 json_mode=True,
                 temperature=0.3,
-                max_tokens=2048,
+                max_tokens=3072,
             )
             data = safe_json_loads(raw)
             return self._parse_schema_response(data, intent)
@@ -116,6 +151,78 @@ class SchemaIntelligenceLayer:
                 "Schema design failed: LLM provider returned an error. "
                 "Please wait 1-2 minutes and retry, or switch to a different provider."
             ) from exc
+
+    def _build_from_column_design(
+        self, column_design: list[dict[str, Any]], intent: IntentObject
+    ) -> SchemaDefinition:
+        """
+        Build a SchemaDefinition directly from the master prompt's column_design list.
+        Avoids a second LLM call when column_design is already rich enough.
+        """
+        from typing import Any as _Any
+
+        table_name = (intent.domain + "_records").lower().replace(" ", "_")
+        columns: list[ColumnDefinition] = []
+        has_pk = False
+
+        _VALID = frozenset({"string", "integer", "float", "boolean", "datetime", "date", "json", "uuid"})
+
+        for cd in column_design:
+            if not isinstance(cd, dict):
+                continue
+            name = str(cd.get("column_name", "")).strip()
+            if not name:
+                continue
+            dtype = str(cd.get("data_type", "string")).lower()
+            if dtype not in _VALID:
+                dtype = "string"
+            is_pk = bool(cd.get("is_primary_key", False))
+            if is_pk:
+                has_pk = True
+
+            enum_vals: list[_Any] = []
+            if cd.get("enum_values") and isinstance(cd["enum_values"], list):
+                enum_vals = list(cd["enum_values"])
+
+            # Also gather enum_values from value pools if semantic_type matches
+            try:
+                col = ColumnDefinition(
+                    name=name,
+                    data_type=dtype,
+                    semantic_type=str(cd.get("semantic_type", "")),
+                    is_primary_key=is_pk,
+                    nullable=bool(cd.get("nullable", True)),
+                    null_rate=float(cd.get("null_rate", 0.0)),
+                    min_value=cd.get("min_value"),
+                    max_value=cd.get("max_value"),
+                    enum_values=enum_vals,
+                    unique=bool(cd.get("unique", False) or is_pk),
+                    description=str(cd.get("description", "")),
+                    format_hint=cd.get("format_hint"),
+                )
+                columns.append(col)
+            except Exception:
+                continue
+
+        if not has_pk:
+            pk_col = ColumnDefinition(
+                name=f"{table_name}_id",
+                data_type="uuid",
+                semantic_type="id",
+                is_primary_key=True,
+                unique=True,
+                nullable=False,
+                description="Auto-generated primary key",
+            )
+            columns.insert(0, pk_col)
+
+        if len(columns) < _MIN_COLUMNS:
+            raise ValueError(
+                f"column_design has only {len(columns)} parseable columns (min {_MIN_COLUMNS})"
+            )
+
+        table = SchemaTable(name=table_name, columns=columns)
+        return SchemaDefinition(tables=[table])
 
     def _parse_schema_response(
         self, data: dict[str, Any], intent: IntentObject

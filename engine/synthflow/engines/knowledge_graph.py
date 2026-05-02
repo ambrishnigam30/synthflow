@@ -28,7 +28,9 @@ from synthflow.models.schemas import (
     NameCulturalPatterns,
     RegionInfo,
     TemporalPatterns,
+    ValuePool,
 )
+from synthflow.prompts.master_prompt import build_knowledge_prompt
 from synthflow.utils.helpers import safe_json_loads
 from synthflow.utils.logger import get_logger
 
@@ -49,19 +51,7 @@ _VALID_CURRENCY_CODES: frozenset[str] = frozenset(
     }
 )
 
-_KNOWLEDGE_SYSTEM_PROMPT = (
-    "You are SynthFlow's domain knowledge expert. Given a domain and region, produce a "
-    "CausalKnowledgeBundle as JSON. Include realistic causal DAG rules, column-level knowledge, "
-    "cross-column correlations, temporal patterns, and cultural naming patterns appropriate for "
-    "the region. Return ONLY valid JSON."
-)
-
-_KNOWLEDGE_USER_TEMPLATE = (
-    "Generate a CausalKnowledgeBundle for domain='{domain}', region='{region}'. "
-    "Return JSON with keys: domain, column_knowledge (list), dag_rules (list), "
-    "correlations (list), temporal_patterns (object), dirty_data_profile (object), "
-    "business_context (object), geographical_constraints (object), name_patterns (object)."
-)
+# Master prompt is imported from synthflow.prompts.master_prompt — no inline constants needed.
 
 
 class UniversalKnowledgeGraph:
@@ -246,7 +236,7 @@ class UniversalKnowledgeGraph:
     async def _llm_activate(
         self, intent: IntentObject, geo_context: dict[str, Any]
     ) -> CausalKnowledgeBundle:
-        """Call LLM to generate a knowledge bundle, with geo context injected."""
+        """Call LLM to generate a knowledge bundle using the master prompt."""
         country_str = getattr(intent.region, "country", "global") if intent.region else "global"
         region_hint = country_str
         if geo_context.get("economics"):
@@ -256,9 +246,21 @@ class UniversalKnowledgeGraph:
                 f"avg salary USD: {econ.get('avg_monthly_salary_usd', 1000)})"
             )
 
-        system = _KNOWLEDGE_SYSTEM_PROMPT
-        user = _KNOWLEDGE_USER_TEMPLATE.format(
-            domain=intent.domain, region=region_hint
+        # Build geo context string for the prompt
+        geo_ctx_str = json.dumps(geo_context, indent=2) if geo_context else "{}"
+
+        # Use the original user prompt from intent if available (extra field via extra="allow")
+        user_prompt_text = getattr(intent, "original_prompt", None) or (
+            f"Generate {intent.row_count} rows of {intent.domain} data"
+            + (f" for {country_str}" if country_str != "global" else "")
+        )
+
+        system, user = build_knowledge_prompt(
+            user_prompt=user_prompt_text,
+            domain=intent.domain,
+            region=region_hint,
+            row_count=intent.row_count,
+            geo_context=geo_ctx_str,
         )
 
         try:
@@ -267,7 +269,7 @@ class UniversalKnowledgeGraph:
                 system_prompt=system,
                 json_mode=True,
                 temperature=0.4,
-                max_tokens=2048,
+                max_tokens=8192,
             )
             data = safe_json_loads(raw)
             return self._build_bundle(data, intent)
@@ -280,13 +282,14 @@ class UniversalKnowledgeGraph:
     def _build_bundle(
         self, data: dict[str, Any], intent: IntentObject
     ) -> CausalKnowledgeBundle:
-        """Build a CausalKnowledgeBundle from LLM response dict."""
+        """Build a CausalKnowledgeBundle from LLM response dict (handles both simple and master prompt formats)."""
         if not isinstance(data, dict):
             raise RuntimeError(
                 "Knowledge extraction failed: LLM provider returned an error. "
                 "Please wait 1-2 minutes and retry, or switch to a different provider."
             )
 
+        # ── dag_rules ─────────────────────────────────────────────────────
         dag_rules: list[CausalDagRule] = []
         for r in data.get("dag_rules", []):
             if isinstance(r, dict) and "parent_column" in r and "child_column" in r:
@@ -302,20 +305,44 @@ class UniversalKnowledgeGraph:
                 except Exception:
                     continue
 
+        # ── column_knowledge — also derive from column_design if present ──
         column_knowledge: list[ColumnKnowledge] = []
-        for c in data.get("column_knowledge", []):
+        # Try column_design from master prompt first (richer)
+        col_design_raw: list[dict[str, Any]] = []
+        if isinstance(data.get("column_design"), list):
+            col_design_raw = data["column_design"]
+        for c in col_design_raw:
             if isinstance(c, dict) and "column_name" in c:
                 try:
+                    dist_info = c.get("distribution", {}) or {}
+                    dist_params = dist_info.get("parameters", {}) if isinstance(dist_info, dict) else {}
                     column_knowledge.append(ColumnKnowledge(
                         column_name=str(c["column_name"]),
                         description=str(c.get("description", "")),
                         semantic_type=c.get("semantic_type"),
                         min_value=c.get("min_value"),
                         max_value=c.get("max_value"),
+                        distribution_hint=str(dist_info.get("type", "")) if dist_info else None,
+                        value_examples=list(c.get("enum_values", [])) if c.get("enum_values") else [],
                     ))
                 except Exception:
                     continue
+        # Fall back to legacy column_knowledge field
+        if not column_knowledge:
+            for c in data.get("column_knowledge", []):
+                if isinstance(c, dict) and "column_name" in c:
+                    try:
+                        column_knowledge.append(ColumnKnowledge(
+                            column_name=str(c["column_name"]),
+                            description=str(c.get("description", "")),
+                            semantic_type=c.get("semantic_type"),
+                            min_value=c.get("min_value"),
+                            max_value=c.get("max_value"),
+                        ))
+                    except Exception:
+                        continue
 
+        # ── correlations ──────────────────────────────────────────────────
         correlations: list[CrossColumnCorrelation] = []
         for cor in data.get("correlations", []):
             if isinstance(cor, dict) and "col_a" in cor and "col_b" in cor:
@@ -328,25 +355,105 @@ class UniversalKnowledgeGraph:
                 except Exception:
                     continue
 
+        # ── temporal_patterns — try master prompt format first, then legacy ──
         temporal: Optional[TemporalPatterns] = None
-        if isinstance(data.get("temporal_patterns"), dict):
+        # Master prompt puts temporal in "temporal_patterns" with slightly different keys
+        tp_raw = data.get("temporal_patterns") or data.get("temporal_patterns_legacy")
+        if isinstance(tp_raw, dict):
             try:
-                temporal = TemporalPatterns(**data["temporal_patterns"])
+                # Map master prompt keys to legacy TemporalPatterns model
+                tp_kwargs: dict[str, Any] = {}
+                if "day_of_week_weights" in tp_raw:
+                    tp_kwargs["day_of_week_weights"] = tp_raw["day_of_week_weights"]
+                if "hour_of_day_weights" in tp_raw:
+                    tp_kwargs["hour_of_day_weights"] = tp_raw["hour_of_day_weights"]
+                if "monthly_seasonality" in tp_raw:
+                    tp_kwargs["monthly_seasonality"] = tp_raw["monthly_seasonality"]
+                elif "monthly_weights" in tp_raw:
+                    # Convert list of 12 floats to {month_str: multiplier} dict
+                    mw = tp_raw["monthly_weights"]
+                    if isinstance(mw, list) and len(mw) == 12:
+                        tp_kwargs["monthly_seasonality"] = {
+                            str(i + 1): float(mw[i]) * 12 for i in range(12)
+                        }
+                if "has_autocorrelation" in tp_raw:
+                    tp_kwargs["has_autocorrelation"] = tp_raw["has_autocorrelation"]
+                if "autocorrelation_rho" in tp_raw:
+                    tp_kwargs["autocorrelation_rho"] = tp_raw["autocorrelation_rho"]
+                temporal = TemporalPatterns(**tp_kwargs)
             except Exception:
                 temporal = TemporalPatterns()
 
+        # ── dirty_data_profile — try legacy format, ignore per-column extended ──
         dirty: Optional[DirtyDataProfile] = None
-        if isinstance(data.get("dirty_data_profile"), dict):
+        ddp_raw = data.get("dirty_data_profile_legacy") or data.get("dirty_data_profile")
+        if isinstance(ddp_raw, dict) and "null_rate" in ddp_raw:
             try:
-                dirty = DirtyDataProfile(**data["dirty_data_profile"])
+                dirty = DirtyDataProfile(**{
+                    k: v for k, v in ddp_raw.items()
+                    if k in DirtyDataProfile.model_fields
+                })
             except Exception:
                 dirty = DirtyDataProfile()
 
+        # ── currency_code ─────────────────────────────────────────────────
         currency = "INR" if (intent.region and intent.region.country == "India") else "USD"
-        if isinstance(data.get("currency_code"), str):
-            candidate = data["currency_code"].upper()
+        # Check blueprint_metadata.geography first
+        bp_meta = data.get("blueprint_metadata") or {}
+        geo_from_meta = bp_meta.get("geography") if isinstance(bp_meta, dict) else {}
+        cand_src = (
+            (geo_from_meta.get("currency_code") if isinstance(geo_from_meta, dict) else None)
+            or data.get("currency_code")
+        )
+        if isinstance(cand_src, str):
+            candidate = cand_src.upper()
             if candidate in _VALID_CURRENCY_CODES:
                 currency = candidate
+
+        # ── real_world_value_pools ────────────────────────────────────────
+        value_pools: list[ValuePool] = []
+        for vp in data.get("real_world_value_pools", []):
+            if isinstance(vp, dict) and "pool_name" in vp:
+                try:
+                    value_pools.append(ValuePool(
+                        pool_name=str(vp["pool_name"]),
+                        used_in_column=str(vp.get("used_in_column", "")),
+                        cultural_context=vp.get("cultural_context"),
+                        verification_basis=vp.get("verification_basis"),
+                        values=[str(v) for v in vp.get("values", [])],
+                    ))
+                except Exception:
+                    continue
+
+        # ── causal_generation_order ───────────────────────────────────────
+        causal_order: list[str] = []
+        if isinstance(data.get("causal_generation_order"), list):
+            causal_order = [str(c) for c in data["causal_generation_order"] if c]
+
+        # ── geography dict ────────────────────────────────────────────────
+        geography_dict: Optional[dict[str, Any]] = None
+        if isinstance(geo_from_meta, dict) and geo_from_meta:
+            geography_dict = geo_from_meta
+        elif isinstance(data.get("geography"), dict):
+            geography_dict = data["geography"]
+
+        # ── institutions ──────────────────────────────────────────────────
+        institutions: list[dict[str, Any]] = []
+        rwe = data.get("real_world_entities") or {}
+        if isinstance(rwe, dict):
+            for inst in rwe.get("institutions", []):
+                if isinstance(inst, dict):
+                    institutions.append(inst)
+
+        # ── simulation_rules ──────────────────────────────────────────────
+        simulation_rules: Optional[dict[str, Any]] = None
+        if isinstance(data.get("simulation_rules"), dict):
+            simulation_rules = data["simulation_rules"]
+
+        # ── dirty_data_profile_extended ───────────────────────────────────
+        ddp_extended: Optional[dict[str, Any]] = None
+        if isinstance(data.get("dirty_data_profile"), dict) and "per_column" in data["dirty_data_profile"]:
+            ddp_extended = data["dirty_data_profile"]
 
         return CausalKnowledgeBundle(
             domain=intent.domain,
@@ -358,6 +465,15 @@ class UniversalKnowledgeGraph:
             correlations=correlations,
             dirty_data_profile=dirty or DirtyDataProfile(),
             currency_code=currency,
+            # New fields from master prompt
+            real_world_value_pools=value_pools,
+            causal_generation_order=causal_order,
+            column_design=col_design_raw,
+            geography=geography_dict,
+            institutions=institutions,
+            simulation_rules=simulation_rules,
+            dirty_data_profile_extended=ddp_extended,
+            blueprint_metadata=bp_meta if isinstance(bp_meta, dict) and bp_meta else None,
         )
 
     # ── Hallucination guard ───────────────────────────────────────────────
