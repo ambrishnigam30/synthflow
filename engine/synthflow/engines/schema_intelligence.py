@@ -46,7 +46,10 @@ _SCHEMA_SYSTEM_PROMPT = (
     "10. If both date_of_birth and age columns exist, mark age as computed (add note in description)\n"
     "11. Data types must be precise: use integer for counts/ages, float for continuous measures, "
     "string for text/codes, datetime for timestamps, date for calendar dates, uuid for IDs\n"
-    "12. Primary key column must use uuid data_type and unique=true and nullable=false"
+    "12. Primary key column must use uuid data_type and unique=true and nullable=false\n"
+    "13. Healthcare patient datasets MUST include at minimum: patient_id, patient_name, age, "
+    "gender, date_of_birth, diagnosis, admission_date. These are mandatory for any healthcare "
+    "patient record system."
 )
 
 _SCHEMA_USER_TEMPLATE = (
@@ -62,7 +65,9 @@ _SCHEMA_USER_TEMPLATE = (
     "Ensure at least 12 columns. Every numeric column must have min_value and max_value."
 )
 
-# Minimum required columns when LLM returns too few
+# Minimum parseable columns from knowledge bundle to use as foundation
+_MIN_KNOWLEDGE_COLUMNS = 8
+# Final minimum column count (enforced via padding if needed)
 _MIN_COLUMNS = 12
 
 
@@ -102,24 +107,64 @@ class SchemaIntelligenceLayer:
         intent: IntentObject,
         knowledge: CausalKnowledgeBundle,
     ) -> SchemaDefinition:
-        # If the master prompt already returned a column_design, use it directly
-        # to avoid an extra LLM round-trip and improve quality consistency.
+        """
+        Build a SchemaDefinition from the knowledge bundle's column_design if available,
+        merging with a schema LLM call when the knowledge bundle has 8–11 columns.
+        Falls back to a full LLM schema call when fewer than 8 columns are parseable.
+        """
+        partial_schema: Optional[SchemaDefinition] = None
+
         if knowledge.column_design:
             try:
-                return self._build_from_column_design(knowledge.column_design, intent)
+                partial_schema = self._build_from_column_design(knowledge.column_design, intent)
+                # If the knowledge bundle already provides 12+ columns, use it directly.
+                total = sum(len(t.columns) for t in partial_schema.tables)
+                if total >= _MIN_COLUMNS:
+                    _LOG.info(
+                        "Using knowledge bundle column_design directly (%d columns)", total
+                    )
+                    return partial_schema
+                # 8–11 columns: use as foundation and let the LLM fill the rest.
+                _LOG.info(
+                    "Knowledge bundle has %d columns (< %d) — merging with schema LLM",
+                    total, _MIN_COLUMNS,
+                )
+            except ValueError as exc:
+                _LOG.warning(
+                    "column_design too sparse (%s) — falling back to full schema LLM", exc
+                )
+                partial_schema = None
             except Exception as exc:
                 _LOG.warning(
                     "column_design from knowledge bundle unusable (%s) — falling back to LLM", exc
                 )
+                partial_schema = None
 
-        region_str = (
-            intent.region.country if intent.region else "global"
-        )
+        llm_schema = await self._schema_llm_call(intent, knowledge, partial_schema)
+
+        if partial_schema is not None:
+            return self._merge_schemas(partial_schema, llm_schema)
+        return llm_schema
+
+    async def _schema_llm_call(
+        self,
+        intent: IntentObject,
+        knowledge: CausalKnowledgeBundle,
+        partial_schema: Optional[SchemaDefinition],
+    ) -> SchemaDefinition:
+        """Invoke the schema LLM to design (or extend) a schema."""
+        region_str = intent.region.country if intent.region else "global"
         implied = ", ".join(intent.implied_columns) if intent.implied_columns else "auto"
 
-        # Build optional hint from column_design if partially parseable
+        # Build hint from already-known columns so LLM adds new ones, not duplicates.
         column_design_hint = ""
-        if knowledge.column_design:
+        if partial_schema is not None:
+            existing = [c.name for t in partial_schema.tables for c in t.columns]
+            column_design_hint = (
+                f"These columns are already defined — DO NOT duplicate them, only ADD new ones "
+                f"to reach 12 total: {', '.join(existing)}.\n"
+            )
+        elif knowledge.column_design:
             col_names = [
                 c.get("column_name", "") for c in knowledge.column_design
                 if isinstance(c, dict) and c.get("column_name")
@@ -230,13 +275,46 @@ class SchemaIntelligenceLayer:
             )
             columns.insert(0, pk_col)
 
-        if len(columns) < _MIN_COLUMNS:
+        if len(columns) < _MIN_KNOWLEDGE_COLUMNS:
             raise ValueError(
-                f"column_design has only {len(columns)} parseable columns (min {_MIN_COLUMNS})"
+                f"column_design has only {len(columns)} parseable columns "
+                f"(min {_MIN_KNOWLEDGE_COLUMNS} to use as foundation)"
             )
 
         table = SchemaTable(name=table_name, columns=columns)
         return SchemaDefinition(tables=[table])
+
+    def _merge_schemas(
+        self,
+        partial: SchemaDefinition,
+        full: SchemaDefinition,
+    ) -> SchemaDefinition:
+        """
+        Merge knowledge-bundle columns (partial) with LLM schema (full).
+        Knowledge-bundle columns take precedence; LLM-only columns are appended
+        to reach the minimum column count without discarding either source.
+        """
+        merged_tables: list[SchemaTable] = []
+        for p_table, f_table in zip(partial.tables, full.tables):
+            known_names = {c.name for c in p_table.columns}
+            extra = [c for c in f_table.columns if c.name not in known_names]
+            merged_cols = list(p_table.columns) + extra
+            merged_tables.append(
+                SchemaTable(
+                    name=p_table.name,
+                    columns=merged_cols,
+                    description=p_table.description or f_table.description,
+                )
+            )
+        # If full schema has more tables than partial, append them.
+        if len(full.tables) > len(partial.tables):
+            merged_tables.extend(full.tables[len(partial.tables):])
+        return SchemaDefinition(
+            tables=merged_tables,
+            version=full.version,
+            description=full.description,
+            relationships=full.relationships,
+        )
 
     def _parse_schema_response(
         self, data: dict[str, Any], intent: IntentObject
