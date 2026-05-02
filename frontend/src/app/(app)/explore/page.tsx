@@ -354,7 +354,7 @@ export default function ExplorePage() {
   const [activeTab, setActiveTab] = useState<TabId>("preview");
   const [uploading, setUploading] = useState(false);
 
-  const selected = datasets.find((d) => d.id === selectedId) ?? null;
+  const selected = Array.isArray(datasets) ? datasets.find((d) => d.id === selectedId) ?? null : null;
 
   // Load datasets on mount
   useEffect(() => {
@@ -363,7 +363,7 @@ export default function ExplorePage() {
 
     let cancelled = false;
     datasetsApi.list().then((list) => {
-      if (!cancelled) setDatasets(list);
+      if (!cancelled) setDatasets(Array.isArray(list) ? list : []);
     }).catch(() => {
       // Silent — user can still upload
     });

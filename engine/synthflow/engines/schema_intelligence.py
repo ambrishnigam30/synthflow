@@ -144,12 +144,26 @@ class SchemaIntelligenceLayer:
                 temperature=0.3,
                 max_tokens=3072,
             )
+            _LOG.debug(
+                "Schema LLM raw response (first 500 chars): %s",
+                (raw or "")[:500],
+            )
             data = safe_json_loads(raw)
+            if data is None:
+                _LOG.error(
+                    "Schema LLM returned unparseable JSON. Full response: %s", raw
+                )
+                raise RuntimeError(
+                    "Schema design failed: LLM returned content that could not be parsed as JSON. "
+                    "Response preview: " + (raw or "")[:200]
+                )
             return self._parse_schema_response(data, intent)
+        except RuntimeError:
+            raise
         except Exception as exc:
             raise RuntimeError(
-                "Schema design failed: LLM provider returned an error. "
-                "Please wait 1-2 minutes and retry, or switch to a different provider."
+                f"Schema design failed: error parsing LLM response ({type(exc).__name__}: {exc}). "
+                "This is a parsing error, not an LLM connectivity error."
             ) from exc
 
     def _build_from_column_design(
@@ -229,15 +243,14 @@ class SchemaIntelligenceLayer:
     ) -> SchemaDefinition:
         if not isinstance(data, dict):
             raise RuntimeError(
-                "Schema design failed: LLM provider returned an error. "
-                "Please wait 1-2 minutes and retry, or switch to a different provider."
+                f"Schema validation failed: expected JSON object from LLM, got {type(data).__name__}. "
+                "The LLM may have returned a list or primitive instead of {{table_name, columns}}."
             )
 
         table_name = str(data.get("table_name", intent.domain + "_records")).lower()
         raw_cols: list[dict[str, Any]] = data.get("columns", [])
 
         columns: list[ColumnDefinition] = []
-        has_pk = False
 
         for rc in raw_cols:
             if not isinstance(rc, dict):
@@ -249,8 +262,6 @@ class SchemaIntelligenceLayer:
             if dtype not in _VALID_DATA_TYPES:
                 dtype = "string"
             is_pk = bool(rc.get("is_primary_key", False))
-            if is_pk:
-                has_pk = True
             try:
                 col = ColumnDefinition(
                     name=name,
@@ -269,17 +280,48 @@ class SchemaIntelligenceLayer:
             except Exception:
                 continue
 
-        if not has_pk:
-            pk_col = ColumnDefinition(
-                name=f"{table_name}_id",
-                data_type="uuid",
-                semantic_type="id",
-                is_primary_key=True,
-                unique=True,
-                nullable=False,
-                description="Auto-generated primary key",
-            )
-            columns.insert(0, pk_col)
+        # Safety net: ensure exactly one PK column exists in the parsed list.
+        # We check the ACTUAL list (not the LLM flag) because a PK column may have
+        # been parsed but its ColumnDefinition constructor silently failed above.
+        actual_pks = [c for c in columns if c.is_primary_key]
+        if not actual_pks:
+            # Try to promote an existing id-like column first
+            promoted = False
+            for i, col in enumerate(columns):
+                name_lower = col.name.lower()
+                is_id_like = (
+                    name_lower.endswith("_id")
+                    or name_lower == "id"
+                    or col.semantic_type in ("identifier", "id", "uuid")
+                )
+                if is_id_like:
+                    _LOG.warning(
+                        "Schema validation: no primary key found in LLM response for table '%s'. "
+                        "Auto-promoting column '%s' to primary key.",
+                        table_name, col.name,
+                    )
+                    columns[i] = col.model_copy(
+                        update={"is_primary_key": True, "unique": True, "nullable": False}
+                    )
+                    promoted = True
+                    break
+            if not promoted:
+                # Last resort: inject a UUID PK as the first column
+                _LOG.warning(
+                    "Schema validation: no id-like column found in table '%s'. "
+                    "Injecting auto-generated UUID primary key.",
+                    table_name,
+                )
+                pk_col = ColumnDefinition(
+                    name=f"{table_name}_id",
+                    data_type="uuid",
+                    semantic_type="id",
+                    is_primary_key=True,
+                    unique=True,
+                    nullable=False,
+                    description="Auto-generated primary key",
+                )
+                columns.insert(0, pk_col)
 
         table = SchemaTable(name=table_name, columns=columns)
         return SchemaDefinition(tables=[table])
