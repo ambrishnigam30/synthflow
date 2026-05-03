@@ -446,6 +446,20 @@ class GenerationService:
             except Exception:
                 pass
 
+        # Save DataFrame as CSV for fast, reliable downloads (avoids re-executing glass_box_code)
+        csv_storage_path: str | None = None
+        if df is not None and len(df) > 0:
+            try:
+                import os
+                _csv_dir = "/tmp/synthflow_data"
+                os.makedirs(_csv_dir, exist_ok=True)
+                _csv_path = f"{_csv_dir}/{generation_id}.csv"
+                df.to_csv(_csv_path, index=False)
+                csv_storage_path = _csv_path
+                logger.info("Generation %s: saved CSV to %s", generation_id, _csv_path)
+            except Exception as _csv_exc:
+                logger.warning("Generation %s: could not save CSV: %s", generation_id, _csv_exc)
+
         # Persist final result to DB
         await self._update_status(
             db,
@@ -458,6 +472,7 @@ class GenerationService:
             row_count=final_row_count,
             schema_json=schema_dict,
             intent_json=intent_dict,
+            storage_path=csv_storage_path,
         )
 
         logger.info(
@@ -495,6 +510,7 @@ class GenerationService:
         row_count: int | None = None,
         schema_json: dict[str, Any] | None = None,
         intent_json: dict[str, Any] | None = None,
+        storage_path: str | None = None,
     ) -> None:
         stmt = select(Generation).where(Generation.id == generation_id)
         result = await db.execute(stmt)
@@ -520,6 +536,8 @@ class GenerationService:
             gen.schema_json = schema_json
         if intent_json is not None:
             gen.intent_json = intent_json
+        if storage_path is not None:
+            gen.storage_path = storage_path
 
         await db.commit()
 

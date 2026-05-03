@@ -211,6 +211,7 @@ class SynthFlowOrchestrator:
                 constraints=constraints,
                 row_count=effective_row_count,
                 seed=effective_seed,
+                user_prompt=prompt,
             )
             execution_context: dict[str, object] = {
                 "row_count": effective_row_count,
@@ -442,6 +443,33 @@ class SynthFlowOrchestrator:
                             )
         except Exception as _exc:
             _LOG.warning("Post-gen sequential date check failed: %s", _exc)
+
+        # ── Fix monetary columns: round floats to 2 decimal places ──────────
+        try:
+            import numpy as _np3
+            _monetary_keywords = ("cost", "price", "amount", "salary", "fee", "charge", "payment")
+            for _mcol in df.columns:
+                if any(kw in _mcol.lower() for kw in _monetary_keywords):
+                    if _np3.issubdtype(df[_mcol].dtype, _np3.floating):
+                        df[_mcol] = df[_mcol].round(2)
+                        _LOG.info(
+                            "Post-gen fix: rounded monetary column '%s' to 2 decimal places", _mcol
+                        )
+        except Exception as _exc:
+            _LOG.warning("Post-gen monetary rounding failed: %s", _exc)
+
+        # ── Fix date columns: strip T00:00:00 timestamp noise ────────────────
+        try:
+            import pandas as _pd4
+            for _dcol in df.columns:
+                if "date" in _dcol.lower():
+                    if _pd4.api.types.is_datetime64_any_dtype(df[_dcol]):
+                        df[_dcol] = _pd4.to_datetime(df[_dcol]).dt.date
+                        _LOG.info(
+                            "Post-gen fix: converted datetime column '%s' to date-only", _dcol
+                        )
+        except Exception as _exc:
+            _LOG.warning("Post-gen date-only conversion failed: %s", _exc)
 
         # Keep a copy of the pre-dirty DataFrame for quality comparison
         seed_df = df.copy()

@@ -50,13 +50,14 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
     },
 }
 
-# Exceptions that should trigger a retry (network + rate-limit errors)
+# Only retry on transient network errors — NOT on HTTP status errors.
+# 429 rate-limit is raised as RuntimeError immediately (no retry, preserves quota).
+# 4xx/5xx HTTP errors are not retried (they reflect provider-side issues, not flakiness).
 _RETRYABLE = (
     httpx.ConnectError,
     httpx.ReadTimeout,
     httpx.WriteTimeout,
     httpx.RemoteProtocolError,
-    httpx.HTTPStatusError,
 )
 
 
@@ -195,6 +196,11 @@ class LLMClient:
             json=payload,
             headers={"Authorization": f"Bearer {self.api_key}"},
         )
+        if resp.status_code == 429:
+            raise RuntimeError(
+                "LLM provider rate limit reached (429). "
+                "Please wait 2 minutes and retry, or switch to a different provider in Settings."
+            )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]  # type: ignore[no-any-return]
 
@@ -227,6 +233,11 @@ class LLMClient:
             f"?key={self.api_key}",
             json=payload,
         )
+        if resp.status_code == 429:
+            raise RuntimeError(
+                "LLM provider rate limit reached (429). "
+                "Please wait 2 minutes and retry, or switch to a different provider in Settings."
+            )
         resp.raise_for_status()
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"]  # type: ignore[no-any-return]
 

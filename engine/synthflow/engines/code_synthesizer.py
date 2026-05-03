@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import base64
+import re
 import textwrap
 from typing import Union
 
@@ -22,6 +23,53 @@ from synthflow.models.schemas import (
 from synthflow.prompts.master_prompt import CODE_SYNTHESIS_RULES
 from synthflow.utils.helpers import safe_json_loads
 
+
+def _fix_known_code_bugs(code: str) -> str:
+    """
+    Post-process LLM-generated code to fix known recurring bug patterns.
+
+    Every production code-generation system (Copilot, Cursor, etc.) has output
+    post-processing. This is the SynthFlow equivalent.
+    """
+    # Fix 1: pd.to_timedelta(...).dt.days → pd.to_timedelta(...).days
+    # TimedeltaIndex has no .dt accessor. .days works directly on TimedeltaIndex.
+    # Only apply on lines that actually contain 'to_timedelta' to avoid breaking
+    # legitimate Series.dt.days usages elsewhere.
+    fixed_lines = []
+    for line in code.split("\n"):
+        if "to_timedelta" in line and ".dt.days" in line:
+            line = line.replace(".dt.days", ".days")
+        fixed_lines.append(line)
+    code = "\n".join(fixed_lines)
+
+    # Fix 2: pd.date_range(...).sample(n) → pd.Series(pd.date_range(...)).sample(n)
+    # DatetimeIndex has no .sample() method; pandas Series does.
+    code = re.sub(
+        r"(pd\.date_range\([^)]+\))\.sample\(",
+        r"pd.Series(\1).sample(",
+        code,
+    )
+
+    # Fix 3: rng.choice(pd.date_range(...)) → rng.choice(np.array(pd.date_range(...)))
+    # DatetimeIndex is read-only and cannot be passed directly to numpy rng.choice.
+    code = re.sub(
+        r"rng\.choice\((pd\.date_range\([^)]+\))",
+        r"rng.choice(np.array(\1)",
+        code,
+    )
+
+    # Fix 4: rng.choice(result).copy() — numpy rng.choice on read-only arrays
+    # returns read-only view; .copy() makes it writeable for downstream assignment.
+    # Only add .copy() when result is immediately assigned to a df column.
+    code = re.sub(
+        r"(rng\.choice\(np\.array\(pd\.date_range\([^)]+\)\)[^)]*\))",
+        r"\1.copy()",
+        code,
+    )
+
+    return code
+
+
 _SYNTHESIZER_SYSTEM_PROMPT = (
     "You are SynthFlow's Glass Box code generator. Generate a standalone Python script that "
     "produces synthetic data. CORE RULES:\n"
@@ -34,10 +82,28 @@ _SYNTHESIZER_SYSTEM_PROMPT = (
     "from typing import Optional\n\n"
     "DATA QUALITY MANDATORY RULES:\n"
     + CODE_SYNTHESIS_RULES
+    + "\n\nREGION COMPLIANCE CHECK — MANDATORY BEFORE FINALIZING CODE:\n"
+    "BEFORE returning the code, verify every embedded name list and institution list against "
+    "the region specified in the user prompt. "
+    "If the prompt says 'from Punjab' or 'Punjab India': hospitals MUST be Punjab hospitals "
+    "(e.g. Fortis Mohali, PGIMER Chandigarh, Max Super Speciality Patiala, Ivy Hospital Mohali, "
+    "Apollo Clinic Ludhiana, Civil Hospital Amritsar); names MUST be Punjabi "
+    "(male: Gurpreet Singh, Harpreet Singh, Jaswant Singh, Balwinder Singh, Sukhwinder Singh; "
+    "female: Gurpreet Kaur, Harpreet Kaur, Manpreet Kaur, Simranjit Kaur, Navneet Kaur). "
+    "Mumbai hospitals in a Punjab dataset is WRONG. Generic pan-India names in a Punjab dataset is WRONG. "
+    "Apply the same principle for every region: Tokyo → Japanese names + Tokyo hospitals; "
+    "Lagos → Yoruba/Igbo names + Lagos hospitals. "
+    "If your embedded value pools do not match the specified region, REPLACE them before returning."
 )
 
 _SYNTHESIZER_USER_TEMPLATE = (
-    "Generate a Glass Box synthetic data script for:\n"
+    "ORIGINAL USER REQUEST: {user_prompt}\n\n"
+    "Generate a Glass Box synthetic data script for this exact request. "
+    "The code MUST be COMPLETELY SELF-CONTAINED — embed all entity lists (names, hospitals, "
+    "cities, diagnoses, products) directly as Python constants in the code. "
+    "Use your own knowledge to populate these lists for the specified region and domain. "
+    "If the value pools below are empty or incomplete, use your own knowledge to create "
+    "appropriate lists — do NOT leave any value pool empty.\n\n"
     "- Table: {table_name}\n"
     "- Columns: {columns}\n"
     "- Domain: {domain}\n"
@@ -46,7 +112,7 @@ _SYNTHESIZER_USER_TEMPLATE = (
     "- Distribution hints: {dist_hints}\n"
     "- DAG rules: {dag_rules}\n"
     "- Causal generation order: {causal_order}\n"
-    "- Value pools (embed these as Python constants):\n{value_pools}\n"
+    "- Value pools (embed these as Python constants — supplement with your own knowledge if sparse):\n{value_pools}\n"
     "Embed all value constants. No Faker imports. Function signature: "
     "def generate(row_count: int, seed: int) -> pd.DataFrame"
 )
@@ -73,6 +139,7 @@ class GlassBoxCodeSynthesizer:
         constraints: ConstraintSet,
         row_count: int,
         seed: int,
+        user_prompt: str = "",
     ) -> str:
         """
         Generate a standalone Python script.
@@ -84,6 +151,7 @@ class GlassBoxCodeSynthesizer:
             constraints:    Constraint set.
             row_count:      Target row count.
             seed:           Random seed for reproducibility.
+            user_prompt:    Original user request — passed to LLM for self-contained generation.
 
         Returns:
             Python source code string.
@@ -122,7 +190,12 @@ class GlassBoxCodeSynthesizer:
             for pool in knowledge.real_world_value_pools[:10]
         ) if knowledge.real_world_value_pools else "  (no value pools provided)"
 
+        _prompt_for_llm = user_prompt or (
+            f"Generate {row_count} rows of {knowledge.domain} data"
+        )
+
         user = _SYNTHESIZER_USER_TEMPLATE.format(
+            user_prompt=_prompt_for_llm,
             table_name=table.name,
             columns=columns_info[:15],
             domain=knowledge.domain,
@@ -151,11 +224,13 @@ class GlassBoxCodeSynthesizer:
             ) from exc
 
     def _extract_python_code(self, raw: str) -> str:
-        """Extract Python code from LLM response, clean markdown, validate."""
+        """Extract Python code from LLM response, clean markdown, fix known bugs, validate."""
         # Strip markdown fences
-        import re
         code = re.sub(r"```python\s*", "", raw)
         code = re.sub(r"```\s*", "", code).strip()
+
+        # Apply known-bug fixes BEFORE validation so self-healing sees clean code
+        code = _fix_known_code_bugs(code)
 
         # Validate that it's Python with a generate function
         if "def generate" not in code:

@@ -65,10 +65,114 @@ _SCHEMA_USER_TEMPLATE = (
     "Ensure at least 12 columns. Every numeric column must have min_value and max_value."
 )
 
-# Minimum parseable columns from knowledge bundle to use as foundation
-_MIN_KNOWLEDGE_COLUMNS = 8
+# Minimum parseable columns from knowledge bundle to use as foundation (no LLM call)
+_MIN_KNOWLEDGE_COLUMNS = 5
 # Final minimum column count (enforced via padding if needed)
 _MIN_COLUMNS = 12
+
+# Domain-essential columns injected programmatically when knowledge bundle has 5-11 columns.
+# Avoids a second LLM call while ensuring each domain has its critical fields.
+_DOMAIN_ESSENTIALS: dict[str, list[tuple[str, str, str, bool]]] = {
+    # (column_name, data_type, semantic_type, is_pk_candidate)
+    "healthcare": [
+        ("patient_id", "uuid", "id", True),
+        ("patient_name", "string", "name", False),
+        ("age", "integer", "age", False),
+        ("gender", "string", "gender", False),
+        ("date_of_birth", "date", "date", False),
+        ("diagnosis", "string", "diagnosis", False),
+        ("admission_date", "date", "date", False),
+        ("discharge_date", "date", "date", False),
+        ("ward", "string", "ward", False),
+        ("doctor_name", "string", "name", False),
+        ("treatment_cost", "float", "monetary", False),
+        ("insurance_provider", "string", "institution", False),
+    ],
+    "banking": [
+        ("account_id", "uuid", "id", True),
+        ("customer_name", "string", "name", False),
+        ("account_type", "string", "account_type", False),
+        ("balance", "float", "monetary", False),
+        ("transaction_date", "date", "date", False),
+        ("transaction_amount", "float", "monetary", False),
+        ("branch_name", "string", "institution", False),
+        ("account_status", "string", "status", False),
+        ("credit_score", "integer", "score", False),
+        ("loan_amount", "float", "monetary", False),
+        ("ifsc_code", "string", "code", False),
+        ("interest_rate", "float", "rate", False),
+    ],
+    "retail": [
+        ("order_id", "uuid", "id", True),
+        ("customer_name", "string", "name", False),
+        ("product_name", "string", "product", False),
+        ("category", "string", "category", False),
+        ("quantity", "integer", "quantity", False),
+        ("unit_price", "float", "monetary", False),
+        ("total_amount", "float", "monetary", False),
+        ("order_date", "date", "date", False),
+        ("delivery_date", "date", "date", False),
+        ("payment_method", "string", "payment_type", False),
+        ("city", "string", "location", False),
+        ("discount_percent", "float", "rate", False),
+    ],
+    "insurance": [
+        ("policy_id", "uuid", "id", True),
+        ("policyholder_name", "string", "name", False),
+        ("policy_type", "string", "policy_type", False),
+        ("premium_amount", "float", "monetary", False),
+        ("start_date", "date", "date", False),
+        ("expiry_date", "date", "date", False),
+        ("sum_insured", "float", "monetary", False),
+        ("claim_status", "string", "status", False),
+        ("agent_name", "string", "name", False),
+        ("city", "string", "location", False),
+        ("age_of_insured", "integer", "age", False),
+        ("nominee_name", "string", "name", False),
+    ],
+    "hr": [
+        ("employee_id", "uuid", "id", True),
+        ("employee_name", "string", "name", False),
+        ("department", "string", "department", False),
+        ("designation", "string", "designation", False),
+        ("salary", "float", "monetary", False),
+        ("joining_date", "date", "date", False),
+        ("gender", "string", "gender", False),
+        ("age", "integer", "age", False),
+        ("city", "string", "location", False),
+        ("performance_rating", "float", "score", False),
+        ("leaves_taken", "integer", "count", False),
+        ("manager_name", "string", "name", False),
+    ],
+    "education": [
+        ("student_id", "uuid", "id", True),
+        ("student_name", "string", "name", False),
+        ("course_name", "string", "course", False),
+        ("enrollment_date", "date", "date", False),
+        ("grade", "float", "score", False),
+        ("attendance_percent", "float", "rate", False),
+        ("gender", "string", "gender", False),
+        ("age", "integer", "age", False),
+        ("city", "string", "location", False),
+        ("institution_name", "string", "institution", False),
+        ("fees_paid", "float", "monetary", False),
+        ("pass_fail", "string", "status", False),
+    ],
+    "ecommerce": [
+        ("order_id", "uuid", "id", True),
+        ("customer_name", "string", "name", False),
+        ("product_name", "string", "product", False),
+        ("category", "string", "category", False),
+        ("quantity", "integer", "quantity", False),
+        ("price", "float", "monetary", False),
+        ("order_date", "date", "date", False),
+        ("delivery_date", "date", "date", False),
+        ("payment_method", "string", "payment_type", False),
+        ("city", "string", "location", False),
+        ("rating", "float", "score", False),
+        ("return_status", "string", "status", False),
+    ],
+}
 
 
 class SchemaIntelligenceLayer:
@@ -124,10 +228,18 @@ class SchemaIntelligenceLayer:
                         "Using knowledge bundle column_design directly (%d columns)", total
                     )
                     return partial_schema
-                # 8–11 columns: use as foundation and let the LLM fill the rest.
+                # 5–11 columns: add domain essentials programmatically — NO extra LLM call.
+                # _ensure_minimum_columns() pads to 12 with generic fillers afterward.
+                if total >= _MIN_KNOWLEDGE_COLUMNS:
+                    _LOG.info(
+                        "Knowledge bundle has %d columns — injecting domain essentials "
+                        "(no LLM call, saves rate-limit quota)",
+                        total,
+                    )
+                    return self._add_domain_essentials(partial_schema, intent)
                 _LOG.info(
-                    "Knowledge bundle has %d columns (< %d) — merging with schema LLM",
-                    total, _MIN_COLUMNS,
+                    "Knowledge bundle has only %d columns (< %d) — falling back to full schema LLM",
+                    total, _MIN_KNOWLEDGE_COLUMNS,
                 )
             except ValueError as exc:
                 _LOG.warning(
@@ -314,6 +426,66 @@ class SchemaIntelligenceLayer:
             version=full.version,
             description=full.description,
             relationships=full.relationships,
+        )
+
+    def _add_domain_essentials(
+        self,
+        schema: SchemaDefinition,
+        intent: IntentObject,
+    ) -> SchemaDefinition:
+        """
+        Inject missing domain-essential columns from _DOMAIN_ESSENTIALS without an LLM call.
+        Only adds columns not already present in the schema.
+        """
+        domain_key = intent.domain.lower().strip()
+        essentials: list[tuple[str, str, str, bool]] = _DOMAIN_ESSENTIALS.get(domain_key, [])
+        if not essentials:
+            # Partial match (e.g. "cardiology" → "healthcare")
+            for key, cols in _DOMAIN_ESSENTIALS.items():
+                if key in domain_key or domain_key in key:
+                    essentials = cols
+                    break
+
+        if not essentials:
+            return schema  # Unknown domain — let _ensure_minimum_columns pad with fillers
+
+        updated_tables: list[SchemaTable] = []
+        for table in schema.tables:
+            existing_names = {c.name.lower() for c in table.columns}
+            has_pk = any(c.is_primary_key for c in table.columns)
+            new_cols = list(table.columns)
+
+            for col_name, dtype, stype, is_pk_candidate in essentials:
+                if col_name.lower() in existing_names:
+                    continue
+                try:
+                    make_pk = is_pk_candidate and not has_pk
+                    col = ColumnDefinition(
+                        name=col_name,
+                        data_type=dtype,
+                        semantic_type=stype,
+                        is_primary_key=make_pk,
+                        unique=make_pk,
+                        nullable=not make_pk,
+                        null_rate=0.0 if make_pk else 0.02,
+                        description=f"Domain-essential column for {intent.domain}",
+                    )
+                    new_cols.append(col)
+                    existing_names.add(col_name.lower())
+                    if make_pk:
+                        has_pk = True
+                except Exception:
+                    continue
+
+            updated_tables.append(
+                SchemaTable(name=table.name, columns=new_cols, description=table.description)
+            )
+
+        return SchemaDefinition(
+            tables=updated_tables,
+            version=schema.version,
+            description=schema.description,
+            relationships=schema.relationships,
         )
 
     def _parse_schema_response(

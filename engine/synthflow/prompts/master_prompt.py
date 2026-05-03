@@ -124,7 +124,7 @@ Return JSON with exactly these top-level keys:
 """
 
 CODE_SYNTHESIS_RULES: str = (
-    "10 MANDATORY RULES FOR CODE GENERATION:\n"
+    "11 MANDATORY RULES FOR CODE GENERATION:\n"
     "RULE 1 NO PLACEHOLDERS: Never generate values like name_0, category_1, treatment_2. "
     "Use rng.choice(ENTITY_LIST, size=n) where ENTITY_LIST comes from the value pools provided. "
     "Every string column must draw from a realistic list of at least 10 real values. "
@@ -136,7 +136,17 @@ CODE_SYNTHESIS_RULES: str = (
     "source of truth and compute age as: age = ((reference_date - dob).dt.days / 365.25).astype(int). "
     "NEVER use pd.date_range with sequential daily intervals — use rng.integers to pick random offsets.\n"
     "RULE 4 CAUSAL IMPLEMENTATION: Generate columns in the causal_generation_order provided. "
-    "Generate parent columns first, then condition children on parent values.\n"
+    "Generate parent columns first, then condition children on parent values. "
+    "CRITICAL — CLASSIFICATION DERIVATION: When generating medical department, category, "
+    "sub_category, or specialty columns, they MUST be derived from the diagnosis/condition "
+    "column using a lookup dict — NEVER generated independently by random choice. "
+    "Build a DIAGNOSIS_TO_DEPT dict: ASTHMA→Pulmonology, DIABETES→Endocrinology, "
+    "HYPERTENSION→Cardiology, HEART FAILURE→Cardiology, PNEUMONIA→Pulmonology, "
+    "FRACTURE→Orthopedics, APPENDICITIS→General Surgery, DEPRESSION→Psychiatry, "
+    "KIDNEY DISEASE→Nephrology, ANEMIA→Hematology. "
+    "Then: df['department'] = df['diagnosis'].str.upper().map(DIAGNOSIS_TO_DEPT).fillna('General Medicine'). "
+    "This causal-derivation rule applies universally: banking transaction_type→fee_category, "
+    "retail product_category→warehouse_zone. Always derive classifications from their parent column.\n"
     "RULE 5 NAME GENDER GEOGRAPHY AGE CORRELATION: Generate gender first, then date_of_birth. "
     "Then select names appropriate for that gender AND region AND birth decade using the value pools. "
     "Male names from male pool, female names from female pool. Use np.where or conditional indexing. "
@@ -159,7 +169,13 @@ CODE_SYNTHESIS_RULES: str = (
     "RULE 10 STATE MACHINE: Enforce valid transitions and temporal ordering. "
     "discharge_date must always be after admission_date. "
     "delivery_date must always be after purchase_date. "
-    "Compute derived dates as: derived = base_date + pd.to_timedelta(rng.exponential(scale=X, size=n), unit='D')"
+    "Compute derived dates as: derived = base_date + pd.to_timedelta(rng.integers(1, 30, size=n), unit='D')\n"
+    "RULE 11 NO TIMEDELTA DT ACCESSOR: NEVER use .dt accessor on a TimedeltaIndex or on the "
+    "direct result of pd.to_timedelta(). The .dt accessor is ONLY valid on a pandas Series of "
+    "timedelta values, not on a TimedeltaIndex. "
+    "CORRECT date offset: discharge_date = admission_date + pd.to_timedelta(rng.integers(1, 30, size=n), unit='D'). "
+    "CORRECT age from dob: age = ((pd.Timestamp.now() - pd.to_datetime(df['date_of_birth'])).dt.days / 365.25).astype(int). "
+    "WRONG (causes runtime error): pd.to_timedelta(...).dt.days — NEVER write this."
 )
 
 KNOWLEDGE_USER_TEMPLATE: str = (
