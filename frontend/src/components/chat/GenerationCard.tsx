@@ -227,8 +227,8 @@ function DownloadBtn({
     setLoading(true);
     try {
       const token =
-        (typeof localStorage !== "undefined" && localStorage.getItem("token")) ||
-        (typeof sessionStorage !== "undefined" && sessionStorage.getItem("token")) ||
+        (typeof localStorage !== "undefined" &&
+          (localStorage.getItem("sf_access") ?? localStorage.getItem("sf_token"))) ||
         "";
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
       const response = await fetch(

@@ -36,9 +36,9 @@ STEP 8 — TEMPORAL PATTERNS: Derive domain-specific weights summing to 1.0 each
 
 STEP 9 — DIRTY DATA: For each column estimate null_rate, typo_rate, and any causal null rule (e.g., patients over 65 have 40% null email_address; unemployed patients have null employer_name).
 
-STEP 10 — VALUE POOLS: Compile exactly 20 real, verified values for every name, place, institution, or entity column. Apply cultural patterns: North Indian male names differ from South Indian; Sikh names use Singh/Kaur suffix; name pools must correlate with gender and region.
+STEP 10 — VALUE POOLS: Compile exactly 20 real, verified values for every name, place, institution, or entity column. CRITICAL: All values MUST be specific to the exact state, city, or region mentioned in the user prompt. If the user says "from Punjab", names must be Punjabi, hospitals must be in Punjab, cities must be Punjab cities. If the user says "in Tokyo", names must be Japanese, hospitals must be Tokyo hospitals. If the user says "Lagos Nigeria", names must be Yoruba/Igbo/Hausa Nigerian names, institutions must be Lagos-based. Generic national-level values are WRONG when a specific region is specified. The cultural, linguistic, and institutional context of the exact geography must be reflected in every value pool. Name pools MUST also reflect the generation/decade of birth. A patient born in 1955 should have a name common in the 1950s for that region, NOT a name popular in 2020. Provide separate sub-pools or tagging by decade: pre-1970 names, 1970-1990 names, 1990-2010 names, post-2010 names.
 
-STEP 11 — COHERENCE AUDIT: Verify column count is 12–18. Every column connects causally to at least 2 others. No column is both nullable AND a primary key. No two columns carry identical information. Add any missing essential columns for the domain.
+STEP 11 — COHERENCE AUDIT: Before finalizing, verify: Does every column make logical sense alongside every other column? Would a real database administrator include ALL these columns in the same table? Remove any column that is decorative, generic, or disconnected. Every column must be causally connected to at least 2 other columns. A "notes" column with generic values like note1/note2 is NEVER acceptable — either make it meaningful (e.g., "clinical_notes" with real medical observations) or remove it entirely. Columns like "is_active", "external_id", "sub_category" are often filler — only include them if they serve a real purpose in this specific domain. Verify column count is 12–18. No column is both nullable AND a primary key. No two columns carry identical information. Add any missing essential columns for the domain.
 
 STEP 12 — GENERATION ORDER: Topological sort of the causal DAG. Root columns (no parents) come first; derived columns come after ALL their parents. This is the exact code generation order.
 """
@@ -56,6 +56,7 @@ ABSOLUTE RULES — any violation causes the output to be rejected:
 8. Zero logical contradictions: discharge_date after admission_date, age non-negative, delivery_date after purchase_date.
 9. Name-gender-region correlation is MANDATORY: male names ONLY from male pool, female names ONLY from female pool.
 10. Healthcare patient datasets MUST include at minimum: patient_id, patient_name, age, gender, date_of_birth, diagnosis, admission_date.
+11. When a specific state, city, or region is mentioned in the user prompt, ALL entity values (names, hospitals, institutions, places) MUST be specific to that exact geography. A dataset "from Punjab" must have Punjabi names and Punjab institutions. A dataset "in Bavaria" must have Bavarian names and Munich/Nuremberg institutions. Generic national values are a violation.
 """
 
 KNOWLEDGE_OUTPUT_SCHEMA: str = """
@@ -136,9 +137,16 @@ CODE_SYNTHESIS_RULES: str = (
     "NEVER use pd.date_range with sequential daily intervals — use rng.integers to pick random offsets.\n"
     "RULE 4 CAUSAL IMPLEMENTATION: Generate columns in the causal_generation_order provided. "
     "Generate parent columns first, then condition children on parent values.\n"
-    "RULE 5 NAME GENDER GEOGRAPHY CORRELATION: Generate gender first. "
-    "Then select names appropriate for that gender AND region AND age bracket using the value pools. "
-    "Male names from male pool, female names from female pool. Use np.where or conditional indexing.\n"
+    "RULE 5 NAME GENDER GEOGRAPHY AGE CORRELATION: Generate gender first, then date_of_birth. "
+    "Then select names appropriate for that gender AND region AND birth decade using the value pools. "
+    "Male names from male pool, female names from female pool. Use np.where or conditional indexing. "
+    "A female born in Punjab in 1955 gets a name like Surjit Kaur or Parkash Kaur. "
+    "A female born in Punjab in 2015 gets a name like Jasleen Kaur or Ananya Kaur. "
+    "Use the decade-tagged value pools from the knowledge bundle. If no decade pools exist, "
+    "use the full pool but implement decade-based name selection logic using birth year: "
+    "birth_year = pd.to_datetime(df['date_of_birth']).dt.year; "
+    "use np.select with conditions [birth_year < 1970, birth_year < 1990, birth_year < 2010] "
+    "choosing from pre-1970, 1970-1990, 1990-2010, and post-2010 name sub-lists.\n"
     "RULE 6 LOCATION VALUE CORRELATION: If location and economic columns both exist, "
     "higher-tier cities get higher salaries and costs. Use a city-to-salary-multiplier dict.\n"
     "RULE 7 REALISTIC DISTRIBUTIONS: Use the exact distribution type and parameters from the "

@@ -102,10 +102,11 @@ class ValidationHygieneEngine:
             self._check_correlation_consistency(df, knowledge),
         ]
 
-        # Per-check debug logging — shows which checks drag the score down
+        # Per-check logging — INFO for failures so they appear in production logs
         for _chk in checks:
-            _LOG.debug(
-                "Check %s: %s — score=%.3f violations=%d — %s",
+            _log_fn = _LOG.warning if not _chk.passed else _LOG.info
+            _log_fn(
+                "Validation check '%s': %s — score=%.3f violations=%d — %s",
                 _chk.check_name,
                 "PASS" if _chk.passed else "FAIL",
                 _chk.score,

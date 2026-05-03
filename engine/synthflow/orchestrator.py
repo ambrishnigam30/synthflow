@@ -278,7 +278,7 @@ class SynthFlowOrchestrator:
         # ── Post-generation quality checks (warnings only, never fail pipeline) ──
         try:
             import re as _re
-            _placeholder_pattern = _re.compile(r"^[a-zA-Z]+_\d+$")
+            _placeholder_pattern = _re.compile(r"^[a-zA-Z]+_?\d+$")
 
             # Build schema column-type lookup for smart UUID detection
             _pg_schema_types: dict[str, str] = {}
@@ -336,7 +336,7 @@ class SynthFlowOrchestrator:
         except Exception as _exc:
             _LOG.warning("Post-gen numeric range check failed: %s", _exc)
 
-        # ── Fix _id columns: negative values → abs, NaN → sequential/uuid4 ──
+        # ── Fix _id columns: decimals/negatives → positive int, NaN → fill ──
         try:
             import numpy as _np2
             _id_table = schema.tables[0] if schema.tables else None
@@ -351,21 +351,31 @@ class SynthFlowOrchestrator:
                 _col_dt = _id_schema_types.get(col, "")
                 _series = df[col]
 
-                if _np2.issubdtype(_series.dtype, _np2.number):
-                    # Fix negative IDs → absolute value, cast to int
-                    _neg_count = int((_series < 0).sum())
-                    if _neg_count > 0:
-                        df[col] = _series.abs().astype(int)
+                # Safely coerce to numeric — handles StringDtype and other extension types
+                _numeric = pd.to_numeric(_series, errors="coerce")
+                _has_any_numeric = _numeric.notna().any()
+
+                if _has_any_numeric:
+                    _is_float = _np2.issubdtype(_numeric.dtype, _np2.floating)
+                    _has_decimals = _is_float and bool((_numeric.dropna() % 1 != 0).any())
+                    _has_negatives = bool((_numeric.dropna() < 0).any())
+
+                    if _has_decimals or _has_negatives:
+                        df[col] = _numeric.abs().fillna(0).astype(int)
                         _LOG.info(
-                            "Post-gen fix: %d negative values in numeric ID column '%s' → abs()",
-                            _neg_count, col,
+                            "Post-gen fix: column '%s' had %s values → abs().astype(int)",
+                            col,
+                            "decimal" if _has_decimals else "negative",
                         )
+                        # Refresh after fix
+                        _numeric = df[col].astype(float)
+
                     # Fix NaN in numeric IDs → fill with sequential integers from max+1
-                    _nan_count = int(df[col].isna().sum())
+                    _nan_count = int(_numeric.isna().sum())
                     if _nan_count > 0:
-                        _cur_max = int(df[col].dropna().max()) if len(df[col].dropna()) > 0 else 0
+                        _cur_max = int(_numeric.dropna().max()) if len(_numeric.dropna()) > 0 else 0
                         _fill_vals = list(range(_cur_max + 1, _cur_max + 1 + _nan_count))
-                        _s_copy = df[col].copy()
+                        _s_copy = _numeric.copy()
                         _s_copy[_s_copy.isna()] = _fill_vals
                         df[col] = _s_copy.astype(int)
                         _LOG.info(
