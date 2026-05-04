@@ -74,6 +74,11 @@ def _fix_known_code_bugs(code: str) -> str:
         code,
     )
 
+    # Fix pd.Timedelta(days=array) → pd.to_timedelta(array, unit='D')
+    code = re.sub(r"pd\.Timedelta\(days=([^)]+)\)", r"pd.to_timedelta(\1, unit='D')", code)
+    # Fix pd.Timedelta(array) when argument contains an rng call (returns array, not scalar)
+    code = re.sub(r"pd\.Timedelta\(([^)]*rng\.[^)]+)\)", r"pd.to_timedelta(\1, unit='D')", code)
+
     return code
 
 

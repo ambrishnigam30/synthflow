@@ -53,7 +53,12 @@ CODE_SYNTHESIS_RULES: str = (
     "(5) Names must match gender and region. "
     "(6) Round monetary values to 2 decimals. "
     "(7) Dates as date type, not datetime. discharge >= admission. "
-    "(8) Use int for IDs, never float."
+    "(8) Use int for IDs, never float. "
+    "(9) Age and date_of_birth must be consistent. NEVER generate them independently. "
+    "Compute one from the other: dob = today - timedelta(age * 365.25 days), "
+    "or age = (today - dob).days / 365.25. "
+    "(10) Names must match the gender column. Generate gender first, then pick names from the "
+    "appropriate gender pool. Never assign names randomly without checking gender."
 )
 
 KNOWLEDGE_USER_TEMPLATE: str = (

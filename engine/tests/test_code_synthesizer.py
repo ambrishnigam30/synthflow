@@ -237,3 +237,35 @@ def test_fix_bugs_idempotent() -> None:
     twice = _fix_known_code_bugs(once)
     # Second pass may expand helper again but must not break syntax
     compile(twice, "<test_idempotent>", "exec")
+
+
+def test_fix_timedelta_days_kwarg() -> None:
+    """pd.Timedelta(days=rng.integers(...)) → pd.to_timedelta(..., unit='D')."""
+    code = (
+        "import pandas as pd\n"
+        "import numpy as np\n"
+        "def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+        "    rng = np.random.default_rng(seed)\n"
+        "    df['tenure'] = pd.Timedelta(days=rng.integers(30, 3650, size=row_count))\n"
+        "    return df\n"
+    )
+    fixed = _fix_known_code_bugs(code)
+    assert "pd.Timedelta(days=" not in fixed
+    assert "pd.to_timedelta(" in fixed
+    assert "unit='D'" in fixed
+
+
+def test_fix_timedelta_positional_rng() -> None:
+    """pd.Timedelta(rng.integers(...)) → pd.to_timedelta(..., unit='D')."""
+    code = (
+        "import pandas as pd\n"
+        "import numpy as np\n"
+        "def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+        "    rng = np.random.default_rng(seed)\n"
+        "    df['age_td'] = pd.Timedelta(rng.integers(0, 365, size=row_count))\n"
+        "    return df\n"
+    )
+    fixed = _fix_known_code_bugs(code)
+    assert "pd.Timedelta(rng." not in fixed
+    assert "pd.to_timedelta(" in fixed
+    assert "unit='D'" in fixed

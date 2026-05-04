@@ -337,7 +337,7 @@ class SynthFlowOrchestrator:
         except Exception as _exc:
             _LOG.warning("Post-gen numeric range check failed: %s", _exc)
 
-        # ── Fix _id columns: decimals/negatives → positive int, NaN → fill ──
+        # ── FIX 1 — ID columns: floats / negatives / nulls → sequential integers ──
         try:
             import numpy as _np2
             _id_table = schema.tables[0] if schema.tables else None
@@ -347,77 +347,78 @@ class SynthFlowOrchestrator:
                     _id_schema_types[_sc2.name] = (_sc2.data_type or "").lower()
 
             for col in df.columns:
-                if "_id" not in col.lower():
+                _col_lower = col.lower()
+                _is_id_col = _col_lower == "id" or _col_lower.endswith("_id")
+                if not _is_id_col:
                     continue
-                _col_dt = _id_schema_types.get(col, "")
-                _series = df[col]
-
-                # Safely coerce to numeric — handles StringDtype and other extension types
-                _numeric = pd.to_numeric(_series, errors="coerce")
-                _has_any_numeric = _numeric.notna().any()
-
-                if _has_any_numeric:
-                    _is_float = _np2.issubdtype(_numeric.dtype, _np2.floating)
-                    _has_decimals = _is_float and bool((_numeric.dropna() % 1 != 0).any())
-                    _has_negatives = bool((_numeric.dropna() < 0).any())
-
-                    if _has_decimals or _has_negatives:
-                        df[col] = _numeric.abs().fillna(0).astype(int)
-                        _LOG.info(
-                            "Post-gen fix: column '%s' had %s values → abs().astype(int)",
-                            col,
-                            "decimal" if _has_decimals else "negative",
-                        )
-                        # Refresh after fix
-                        _numeric = df[col].astype(float)
-
-                    # Fix NaN in numeric IDs → fill with sequential integers from max+1
-                    _nan_count = int(_numeric.isna().sum())
+                _col_schema_type = _id_schema_types.get(col, "")
+                if "uuid" in _col_schema_type or "uuid" in _col_lower:
+                    _nan_count = int(df[col].isna().sum())
                     if _nan_count > 0:
-                        _cur_max = int(_numeric.dropna().max()) if len(_numeric.dropna()) > 0 else 0
-                        _fill_vals = list(range(_cur_max + 1, _cur_max + 1 + _nan_count))
-                        _s_copy = _numeric.copy()
-                        _s_copy[_s_copy.isna()] = _fill_vals
-                        df[col] = _s_copy.astype(int)
-                        _LOG.info(
-                            "Post-gen fix: %d NaN values in numeric ID column '%s' → sequential ints",
-                            _nan_count, col,
-                        )
-                elif _col_dt == "uuid":
-                    # Fix NaN in UUID ID columns → new uuid4
-                    _nan_count = int(_series.isna().sum())
-                    if _nan_count > 0:
-                        _s_copy2 = _series.copy().astype(object)
-                        _s_copy2[_s_copy2.isna()] = [str(uuid.uuid4()) for _ in range(_nan_count)]
-                        df[col] = _s_copy2
+                        _s_copy = df[col].copy().astype(object)
+                        _s_copy[_s_copy.isna()] = [str(uuid.uuid4()) for _ in range(_nan_count)]
+                        df[col] = _s_copy
                         _LOG.info(
                             "Post-gen fix: %d NaN values in UUID ID column '%s' → uuid4",
                             _nan_count, col,
                         )
+                    continue
+                _series = df[col]
+                _numeric = pd.to_numeric(_series, errors="coerce")
+                _has_floats = (
+                    _numeric.notna().any()
+                    and _np2.issubdtype(_numeric.dtype, _np2.floating)
+                    and bool((_numeric.dropna() % 1 != 0).any())
+                )
+                _has_negatives = _numeric.notna().any() and bool((_numeric.dropna() < 0).any())
+                _has_nulls = bool(_series.isna().any())
+                if _has_floats or _has_negatives or _has_nulls:
+                    df[col] = list(range(1, len(df) + 1))
+                    _LOG.info(
+                        "Post-gen fix: replaced malformed ID column '%s' with sequential integers",
+                        col,
+                    )
         except Exception as _exc:
             _LOG.warning("Post-gen ID column fix failed: %s", _exc)
 
+        # ── FIX 2 — Age columns: clip 0-120, fill nulls with median, to int ──
         try:
-            import pandas as _pd
-            _dob_col = next(
-                (c for c in df.columns if c in ("date_of_birth", "dob", "birth_date")), None
+            for col in df.columns:
+                if "age" not in col.lower():
+                    continue
+                _age_numeric = pd.to_numeric(df[col], errors="coerce")
+                if _age_numeric.notna().sum() == 0:
+                    continue
+                _age_numeric = _age_numeric.clip(lower=0, upper=120)
+                _age_median = _age_numeric.median()
+                _age_numeric = _age_numeric.fillna(_age_median)
+                df[col] = _age_numeric.astype(int)
+                _LOG.info("Post-gen fix: cleaned age column '%s'", col)
+        except Exception as _exc:
+            _LOG.warning("Post-gen age column fix failed: %s", _exc)
+
+        # ── FIX 3 — Age-DOB consistency: recompute DOB from age ─────────────
+        try:
+            import pandas as _pd3
+            _dob_keywords = ("dob", "birth_date", "date_of_birth", "birthdate")
+            _dob_col3 = next(
+                (c for c in df.columns if any(kw in c.lower() for kw in _dob_keywords)), None
             )
-            _age_col = next(
-                (c for c in df.columns if c in ("age", "age_years")), None
-            )
-            if _dob_col and _age_col and _pd.api.types.is_datetime64_any_dtype(df[_dob_col]):
-                _ref = _pd.Timestamp.now()
-                _computed_age = ((_ref - df[_dob_col]).dt.days / 365.25).astype(int)
-                _diff = (_computed_age - df[_age_col].fillna(0)).abs()
-                _inconsistent = (_diff > 2).sum()
-                if _inconsistent > 0:
-                    _LOG.warning(
-                        "Post-gen quality: %d rows have age/date_of_birth inconsistency "
-                        "(>2 year gap) — date consistency rule not applied in generated code",
-                        _inconsistent,
+            _age_col3 = next((c for c in df.columns if "age" in c.lower()), None)
+            if _dob_col3 and _age_col3:
+                _age_vals3 = pd.to_numeric(df[_age_col3], errors="coerce")
+                if _age_vals3.notna().sum() > 0:
+                    _today3 = _pd3.Timestamp.now().normalize()
+                    df[_dob_col3] = (
+                        _today3
+                        - _pd3.to_timedelta(_age_vals3.fillna(30) * 365.25, unit="D")
+                    ).dt.date
+                    _LOG.info(
+                        "Post-gen fix: recomputed '%s' from '%s' for consistency",
+                        _dob_col3, _age_col3,
                     )
         except Exception as _exc:
-            _LOG.warning("Post-gen date consistency check failed: %s", _exc)
+            _LOG.warning("Post-gen age-DOB recomputation failed: %s", _exc)
 
         try:
             import pandas as _pd2
@@ -447,7 +448,7 @@ class SynthFlowOrchestrator:
         # ── Fix monetary columns: round floats to 2 decimal places ──────────
         try:
             import numpy as _np3
-            _monetary_keywords = ("cost", "price", "amount", "salary", "fee", "charge", "payment")
+            _monetary_keywords = ("cost", "price", "amount", "salary", "fee", "bill", "charge", "payment")
             for _mcol in df.columns:
                 if any(kw in _mcol.lower() for kw in _monetary_keywords):
                     if _np3.issubdtype(df[_mcol].dtype, _np3.floating):
@@ -457,6 +458,27 @@ class SynthFlowOrchestrator:
                         )
         except Exception as _exc:
             _LOG.warning("Post-gen monetary rounding failed: %s", _exc)
+
+        # ── FIX 4 — Monetary scaling: multiply by 100 if values are too low ──
+        try:
+            import numpy as _np4
+            _monetary_scale_kw = ("amount", "cost", "price", "salary", "fee", "bill", "charge", "payment")
+            for _scol in df.columns:
+                if not any(kw in _scol.lower() for kw in _monetary_scale_kw):
+                    continue
+                if not _np4.issubdtype(df[_scol].dtype, _np4.number):
+                    continue
+                _col_vals = pd.to_numeric(df[_scol], errors="coerce").dropna()
+                if len(_col_vals) == 0:
+                    continue
+                if _col_vals.mean() < 500 and _col_vals.max() < 10000:
+                    df[_scol] = (df[_scol] * 100).round(2)
+                    _LOG.info(
+                        "Post-gen fix: scaled '%s' by 100x (values appeared unrealistically low)",
+                        _scol,
+                    )
+        except Exception as _exc:
+            _LOG.warning("Post-gen monetary scaling failed: %s", _exc)
 
         # ── Fix date columns: strip T00:00:00 timestamp noise ────────────────
         try:
@@ -470,6 +492,45 @@ class SynthFlowOrchestrator:
                         )
         except Exception as _exc:
             _LOG.warning("Post-gen date-only conversion failed: %s", _exc)
+
+        # ── FIX 5 — Quality warnings (no data changes) ───────────────────────
+        try:
+            _n_rows = len(df)
+            for col in df.columns:
+                _null_pct = df[col].isna().mean()
+                if _null_pct > 0.20:
+                    _LOG.warning(
+                        "Post-gen quality: column '%s' has %.0f%% null values",
+                        col, _null_pct * 100,
+                    )
+
+            _name_cols = [c for c in df.columns if "name" in c.lower()]
+            for _ncol in _name_cols:
+                _unique_ratio = df[_ncol].nunique() / _n_rows if _n_rows > 0 else 1.0
+                if _unique_ratio < 0.40:
+                    _LOG.warning(
+                        "Post-gen quality: name column '%s' has only %.0f%% unique values "
+                        "(repetitive names — value pool may be too small)",
+                        _ncol, _unique_ratio * 100,
+                    )
+
+            _gender_cols = [c for c in df.columns if "gender" in c.lower() or c.lower() == "sex"]
+            if _gender_cols and _name_cols:
+                _gc = _gender_cols[0]
+                _nc = _name_cols[0]
+                _gvals = df[_gc].dropna().astype(str).str.lower().unique()
+                _has_both = any("m" in v for v in _gvals) and any("f" in v for v in _gvals)
+                if _has_both:
+                    _unique_per_gender = df.groupby(_gc)[_nc].nunique()
+                    _total_unique = df[_nc].nunique()
+                    if _total_unique > 0 and _unique_per_gender.min() / _total_unique > 0.85:
+                        _LOG.warning(
+                            "Post-gen quality: gender column '%s' and name column '%s' may not "
+                            "be correlated — names do not appear to vary by gender",
+                            _gc, _nc,
+                        )
+        except Exception as _exc:
+            _LOG.warning("Post-gen quality warnings check failed: %s", _exc)
 
         # Keep a copy of the pre-dirty DataFrame for quality comparison
         seed_df = df.copy()
