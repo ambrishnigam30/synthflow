@@ -24,11 +24,6 @@ from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
-_GENERATION_KEYWORDS = re.compile(
-    r"\b(generate|create|produce|build|make|synthesize|give me|generate me|"
-    r"i need|can you make|please create)\b.*\b(data|dataset|records|rows|sample|csv)\b",
-    re.IGNORECASE,
-)
 _MODIFICATION_KEYWORDS = re.compile(
     r"\b(add|remove|delete|change|modify|update|increase|decrease|make it|"
     r"adjust|set|filter|include|exclude)\b",
@@ -36,6 +31,36 @@ _MODIFICATION_KEYWORDS = re.compile(
 )
 
 IntentType = Literal["generation", "modification", "conversation"]
+
+
+def is_generation_request(message: str) -> bool:
+    """Detect if a user message is requesting data generation."""
+    msg = message.lower().strip()
+
+    has_number = bool(re.search(r"\b\d+\b", msg))
+
+    action_words = [
+        "generate", "create", "make", "build", "produce", "give me",
+        "i need", "list of", "prepare", "simulate", "synthesize",
+        "get me", "fabricate", "show me", "provide",
+    ]
+    has_action = any(word in msg for word in action_words)
+
+    data_nouns = [
+        "record", "row", "entr", "dataset", "data", "sample",
+        "transaction", "patient", "student", "employee", "order",
+        "customer", "account", "invoice", "report", "log", "event",
+        "user", "product", "item", "ticket", "claim", "policy",
+        "payment", "loan", "deposit", "person", "people", "member",
+        "school", "hospital", "bank", "company", "store", "shop",
+    ]
+    has_data_noun = any(noun in msg for noun in data_nouns)
+
+    return (
+        (has_number and has_data_noun)
+        or (has_action and has_data_noun)
+        or (has_action and has_number)
+    )
 
 
 class ChatService:
@@ -51,11 +76,7 @@ class ChatService:
         - ``"modification"``: user wants to modify the last generated dataset.
         - ``"conversation"``: general question or discussion.
         """
-        if _GENERATION_KEYWORDS.search(message):
-            return "generation"
-
-        # Row-count pattern heuristic ("500 rows", "5k records")
-        if re.search(r"\b\d[\d,]*\s*(rows?|records?|samples?)\b", message, re.IGNORECASE):
+        if is_generation_request(message):
             return "generation"
 
         if _MODIFICATION_KEYWORDS.search(message):
@@ -168,9 +189,9 @@ class ChatService:
 
         # Fallback: canned template response
         reply = (
-            f"I understand you're asking about: {message[:80]}. "
-            "I can help you generate synthetic data or answer questions about data science. "
-            "To generate a dataset, try: 'Generate 1000 healthcare records for India'."
+            "I can help you generate synthetic data! Try describing what you need, like: "
+            "'50 student records from Indian schools' or '100 banking transactions from Mumbai'. "
+            "Include the number of rows and the type of data you want."
         )
         for word in reply.split():
             yield word + " "
