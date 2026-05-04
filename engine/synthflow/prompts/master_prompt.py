@@ -15,167 +15,45 @@ KNOWLEDGE_SYSTEM_INSTRUCTION: str = (
     "institutions, names, codes, and values verifiable on the internet. Return valid JSON only."
 )
 
-KNOWLEDGE_THINKING_STEPS: str = """
-MANDATORY THINKING PROCESS — complete all 12 steps before generating output:
+KNOWLEDGE_THINKING_STEPS: str = (
+    "Before generating output, think through: "
+    "(1) What real enterprise system produces this data? "
+    "(2) What is the exact geography — country, state, city, currency, language for names? "
+    "(3) What real institutions exist in that specific region? "
+    "(4) Build a causal dependency graph — root columns first, derived columns after their parents. "
+    "(5) What are realistic distributions for numeric columns? "
+    "(6) Provide 20 real verified values per entity column, specific to the requested region — "
+    "not generic national values. Names must match gender and region. Names must also reflect birth decade — older people get traditional names, younger people get modern names. "
+    "(7) Ensure 12-18 columns, each column should be causally connected to at least 2 others. No filler columns.Every classification column must be derived from its parent column, not generated randomly. The parent determines the child."
+)
 
-STEP 1 — DOMAIN: Identify the real enterprise software (e.g., Epic EMR, SAP S/4HANA, Temenos T24), the exact department, and the actual table name it would use in that system.
+KNOWLEDGE_ABSOLUTE_RULES: str = (
+    "RULES: Return ONLY valid JSON. Never invent unverifiable entities. 12-18 columns. "
+    "Every entity column gets 20 real values specific to the requested region. "
+    "Name-gender correlation mandatory. "
+    "causal_generation_order must list every column once in dependency order."
+)
 
-STEP 2 — GEOGRAPHY: Derive the country/state/city. Then: ISO 4217 currency code, phone format with trunk prefix, postal code format regex, primary language/script for names, and timezone.
-
-STEP 3 — REGULATIONS: List only real applicable laws for this domain and geography (India: DPDP Act 2023, RBI/IRDAI/SEBI; US: HIPAA/SOX/PCI-DSS; EU: GDPR/PSD2). Omit any you are not certain about.
-
-STEP 4 — INSTITUTIONS: List real verifiable organizations (hospitals, banks, companies) grouped as tier_1/tier_2/tier_3. Include only those you are certain exist on the internet.
-
-STEP 5 — CODE STANDARDS: Identify industry codes (ICD-10-CM for healthcare, IFSC for Indian banking, HSN for GST, NPI for US providers). Provide format_regex and 3–5 real example codes.
-
-STEP 6 — CAUSAL DAG: Build the dependency graph. Start with root columns (IDs, gender, date_of_birth). Then derive everything causally: age from date_of_birth; city determines state and postal_code; diagnosis determines treatment; income determines product_tier. List every column with causal_parents and the derivation rule.
-
-STEP 7 — STATISTICS: For every numeric column recall the real distribution: salaries are lognormal; cardiac patient age is truncated normal (mean 62, sd 12, range 18–90); transaction amounts follow a power law; CIBIL scores are normal (mean 720, sd 80, range 300–900). Provide distribution type and parameters.
-
-STEP 8 — TEMPORAL PATTERNS: Derive domain-specific weights summing to 1.0 each: day_of_week_weights (7 values), hour_of_day_weights (24 values), monthly_weights (12 values). Ground these in real patterns (hospital admissions peak Mon–Tue; retail peaks Fri–Sat evening).
-
-STEP 9 — DIRTY DATA: For each column estimate null_rate, typo_rate, and any causal null rule (e.g., patients over 65 have 40% null email_address; unemployed patients have null employer_name).
-
-STEP 10 — VALUE POOLS: Compile exactly 20 real, verified values for every name, place, institution, or entity column. CRITICAL: All values MUST be specific to the exact state, city, or region mentioned in the user prompt. If the user says "from Punjab", names must be Punjabi, hospitals must be in Punjab, cities must be Punjab cities. If the user says "in Tokyo", names must be Japanese, hospitals must be Tokyo hospitals. If the user says "Lagos Nigeria", names must be Yoruba/Igbo/Hausa Nigerian names, institutions must be Lagos-based. Generic national-level values are WRONG when a specific region is specified. The cultural, linguistic, and institutional context of the exact geography must be reflected in every value pool. Name pools MUST also reflect the generation/decade of birth. A patient born in 1955 should have a name common in the 1950s for that region, NOT a name popular in 2020. Provide separate sub-pools or tagging by decade: pre-1970 names, 1970-1990 names, 1990-2010 names, post-2010 names.
-
-STEP 11 — COHERENCE AUDIT: Before finalizing, verify: Does every column make logical sense alongside every other column? Would a real database administrator include ALL these columns in the same table? Remove any column that is decorative, generic, or disconnected. Every column must be causally connected to at least 2 other columns. A "notes" column with generic values like note1/note2 is NEVER acceptable — either make it meaningful (e.g., "clinical_notes" with real medical observations) or remove it entirely. Columns like "is_active", "external_id", "sub_category" are often filler — only include them if they serve a real purpose in this specific domain. Verify column count is 12–18. No column is both nullable AND a primary key. No two columns carry identical information. Add any missing essential columns for the domain.
-
-STEP 12 — GENERATION ORDER: Topological sort of the causal DAG. Root columns (no parents) come first; derived columns come after ALL their parents. This is the exact code generation order.
-"""
-
-KNOWLEDGE_ABSOLUTE_RULES: str = """
-ABSOLUTE RULES — any violation causes the output to be rejected:
-
-1. Return ONLY valid JSON. No markdown fences, no explanatory text, no comments.
-2. NEVER invent any institution, hospital, bank, person, place, or code not verifiable on the internet. Exclude if uncertain.
-3. Column count MUST be 12–18 inclusive.
-4. Every numeric column MUST have a distribution_type and real statistical parameters.
-5. causal_generation_order MUST list every column exactly once in strict dependency order.
-6. real_world_value_pools MUST provide exactly 20 verified values for every entity/name/place column.
-7. day_of_week_weights (7), monthly_weights (12), hour_of_day_weights (24) MUST each independently sum to 1.0.
-8. Zero logical contradictions: discharge_date after admission_date, age non-negative, delivery_date after purchase_date.
-9. Name-gender-region correlation is MANDATORY: male names ONLY from male pool, female names ONLY from female pool.
-10. Healthcare patient datasets MUST include at minimum: patient_id, patient_name, age, gender, date_of_birth, diagnosis, admission_date.
-11. When a specific state, city, or region is mentioned in the user prompt, ALL entity values (names, hospitals, institutions, places) MUST be specific to that exact geography. A dataset "from Punjab" must have Punjabi names and Punjab institutions. A dataset "in Bavaria" must have Bavarian names and Munich/Nuremberg institutions. Generic national values are a violation.
-"""
-
-KNOWLEDGE_OUTPUT_SCHEMA: str = """
-Return JSON with exactly these top-level keys:
-
-{
-  "blueprint_metadata": {
-    "title": "string",
-    "domain": "string",
-    "geography": {
-      "country": "string", "state": "string", "city": "string",
-      "currency_code": "ISO 4217 string", "timezone": "string"
-    },
-    "regulatory_context": ["list of applicable regulations"],
-    "row_count": integer
-  },
-
-  "real_world_entities": {
-    "institutions": [
-      {"real_name": "string", "website": "string", "tier": "tier_1|tier_2|tier_3", "used_in_column": "string"}
-    ],
-    "code_standards": [
-      {"standard_name": "string", "format_regex": "string", "example_real_codes": ["3-5 real codes"], "used_in_column": "string"}
-    ]
-  },
-
-  "real_world_value_pools": [
-    {"pool_name": "string", "used_in_column": "string", "values": ["exactly 20 real verified values"]}
-  ],
-
-  "column_design": [
-    {
-      "column_name": "snake_case_string",
-      "data_type": "string|integer|float|boolean|datetime|date|uuid",
-      "semantic_type": "e.g. age, salary, diagnosis_code, patient_name",
-      "is_primary_key": false,
-      "nullable": true,
-      "min_value": null,
-      "max_value": null,
-      "enum_values": [],
-      "causal_parents": []
-    }
-  ],
-
-  "causal_generation_order": ["column_name1", "column_name2"],
-
-  "temporal_patterns": {
-    "day_of_week_weights": [7 floats summing to 1.0],
-    "monthly_weights": [12 floats summing to 1.0],
-    "hour_of_day_weights": [24 floats summing to 1.0]
-  },
-
-  "dirty_data_profile": {
-    "per_column": [
-      {"column_name": "string", "null_rate": 0.0, "typo_rate": 0.0, "causal_null_rule": "string or null"}
-    ]
-  },
-
-  "dag_rules": [
-    {"parent_column": "string", "child_column": "string", "lambda_str": "lambda row, rng: ...", "description": "string"}
-  ],
-
-  "currency_code": "ISO 4217 string"
-}
-"""
+KNOWLEDGE_OUTPUT_SCHEMA: str = (
+    "Return JSON with keys: "
+    "blueprint_metadata {title, domain, geography {country, state, city, currency_code, timezone}, row_count}, "
+    "real_world_value_pools [{pool_name, used_in_column, values[20]}], "
+    "column_design [{column_name, data_type, semantic_type, is_primary_key, nullable, "
+    "min_value, max_value, enum_values, causal_parents}], "
+    "causal_generation_order [list], "
+    "temporal_patterns {day_of_week_weights[7], monthly_weights[12]}."
+)
 
 CODE_SYNTHESIS_RULES: str = (
-    "11 MANDATORY RULES FOR CODE GENERATION:\n"
-    "RULE 1 NO PLACEHOLDERS: Never generate values like name_0, category_1, treatment_2. "
-    "Use rng.choice(ENTITY_LIST, size=n) where ENTITY_LIST comes from the value pools provided. "
-    "Every string column must draw from a realistic list of at least 10 real values. "
-    "If no pool is provided, embed realistic domain-appropriate values as constants.\n"
-    "RULE 2 NUMERIC CONSTRAINTS: All numeric values must be within the schema min and max. "
-    "Use np.clip(generated_values, min_val, max_val). Age must be INTEGER never float — "
-    "use .astype(int). Credit scores are integer. Counts are integer.\n"
-    "RULE 3 DATE CONSISTENCY: If both date_of_birth and age columns exist, pick date_of_birth as "
-    "source of truth and compute age as: age = ((reference_date - dob).dt.days / 365.25).astype(int). "
-    "NEVER use pd.date_range with sequential daily intervals — use rng.integers to pick random offsets.\n"
-    "RULE 4 CAUSAL IMPLEMENTATION: Generate columns in the causal_generation_order provided. "
-    "Generate parent columns first, then condition children on parent values. "
-    "CRITICAL — CLASSIFICATION DERIVATION: When generating medical department, category, "
-    "sub_category, or specialty columns, they MUST be derived from the diagnosis/condition "
-    "column using a lookup dict — NEVER generated independently by random choice. "
-    "Build a DIAGNOSIS_TO_DEPT dict: ASTHMA→Pulmonology, DIABETES→Endocrinology, "
-    "HYPERTENSION→Cardiology, HEART FAILURE→Cardiology, PNEUMONIA→Pulmonology, "
-    "FRACTURE→Orthopedics, APPENDICITIS→General Surgery, DEPRESSION→Psychiatry, "
-    "KIDNEY DISEASE→Nephrology, ANEMIA→Hematology. "
-    "Then: df['department'] = df['diagnosis'].str.upper().map(DIAGNOSIS_TO_DEPT).fillna('General Medicine'). "
-    "This causal-derivation rule applies universally: banking transaction_type→fee_category, "
-    "retail product_category→warehouse_zone. Always derive classifications from their parent column.\n"
-    "RULE 5 NAME GENDER GEOGRAPHY AGE CORRELATION: Generate gender first, then date_of_birth. "
-    "Then select names appropriate for that gender AND region AND birth decade using the value pools. "
-    "Male names from male pool, female names from female pool. Use np.where or conditional indexing. "
-    "A female born in Punjab in 1955 gets a name like Surjit Kaur or Parkash Kaur. "
-    "A female born in Punjab in 2015 gets a name like Jasleen Kaur or Ananya Kaur. "
-    "Use the decade-tagged value pools from the knowledge bundle. If no decade pools exist, "
-    "use the full pool but implement decade-based name selection logic using birth year: "
-    "birth_year = pd.to_datetime(df['date_of_birth']).dt.year; "
-    "use np.select with conditions [birth_year < 1970, birth_year < 1990, birth_year < 2010] "
-    "choosing from pre-1970, 1970-1990, 1990-2010, and post-2010 name sub-lists.\n"
-    "RULE 6 LOCATION VALUE CORRELATION: If location and economic columns both exist, "
-    "higher-tier cities get higher salaries and costs. Use a city-to-salary-multiplier dict.\n"
-    "RULE 7 REALISTIC DISTRIBUTIONS: Use the exact distribution type and parameters from the "
-    "knowledge bundle. rng.normal(mean, std, size=n) for continuous, "
-    "rng.choice(values, p=weights, size=n) for categorical.\n"
-    "RULE 8 NULL INJECTION: Follow the dirty_data_profile. Inject nulls causally not randomly. "
-    "Example: mask = (df['age'] > 65) & (rng.random(n) < 0.40); df.loc[mask, 'email'] = None\n"
-    "RULE 9 TEMPORAL RHYTHMS: Use day_of_week_weights and hour_of_day_weights from knowledge "
-    "bundle when generating timestamps. Sample days proportionally.\n"
-    "RULE 10 STATE MACHINE: Enforce valid transitions and temporal ordering. "
-    "discharge_date must always be after admission_date. "
-    "delivery_date must always be after purchase_date. "
-    "Compute derived dates as: derived = base_date + pd.to_timedelta(rng.integers(1, 30, size=n), unit='D')\n"
-    "RULE 11 NO TIMEDELTA DT ACCESSOR: NEVER use .dt accessor on a TimedeltaIndex or on the "
-    "direct result of pd.to_timedelta(). The .dt accessor is ONLY valid on a pandas Series of "
-    "timedelta values, not on a TimedeltaIndex. "
-    "CORRECT date offset: discharge_date = admission_date + pd.to_timedelta(rng.integers(1, 30, size=n), unit='D'). "
-    "CORRECT age from dob: age = ((pd.Timestamp.now() - pd.to_datetime(df['date_of_birth'])).dt.days / 365.25).astype(int). "
-    "WRONG (causes runtime error): pd.to_timedelta(...).dt.days — NEVER write this."
+    "RULES: "
+    "(1) No placeholders — use rng.choice from embedded lists, never name_0. "
+    "(2) Numeric values within schema min/max, age as int. "
+    "(3) Compute age from DOB or vice versa. "
+    "(4) Generate parent columns before children. "
+    "(5) Names must match gender and region. "
+    "(6) Round monetary values to 2 decimals. "
+    "(7) Dates as date type, not datetime. discharge >= admission. "
+    "(8) Use int for IDs, never float."
 )
 
 KNOWLEDGE_USER_TEMPLATE: str = (

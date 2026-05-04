@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from synthflow.engines.code_synthesizer import GlassBoxCodeSynthesizer
+from synthflow.engines.code_synthesizer import GlassBoxCodeSynthesizer, _fix_known_code_bugs
 from synthflow.llm_client import MockLLMClient
 from synthflow.models.schemas import (
     CausalKnowledgeBundle,
@@ -54,7 +54,7 @@ _VALID_GENERATE_SCRIPT = (
 
 def _synth() -> GlassBoxCodeSynthesizer:
     client = MockLLMClient()
-    client.set_response("Glass Box", _VALID_GENERATE_SCRIPT)
+    client.set_response("value constants", _VALID_GENERATE_SCRIPT)
     return GlassBoxCodeSynthesizer(client)
 
 
@@ -149,3 +149,91 @@ def test_code_synthesizer_wrapper_no_triple_quote_embedding() -> None:
     assert "def generate(row_count: int, seed: int):" not in wrapper
     # But base64 machinery should be present
     assert "_SCRIPT_B64" in wrapper
+
+
+# ── E-008-08 through E-008-13: _fix_known_code_bugs brute-force tests ────────
+
+def test_fix_bugs_injects_safe_days_helper() -> None:
+    """_fix_known_code_bugs injects _safe_days helper before generate()."""
+    code = "import pandas as pd\n\ndef generate(row_count: int, seed: int) -> pd.DataFrame:\n    return pd.DataFrame()\n"
+    fixed = _fix_known_code_bugs(code)
+    assert "def _safe_days" in fixed
+    # Helper must appear BEFORE generate
+    assert fixed.index("def _safe_days") < fixed.index("def generate")
+
+
+def test_fix_bugs_parenthesised_subtraction_dt_days() -> None:
+    """(df['end'] - df['start']).dt.days is replaced with _safe_days(...)."""
+    code = (
+        "import pandas as pd\n"
+        "def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+        "    df['days'] = (df['discharge'] - df['admission']).dt.days\n"
+        "    return df\n"
+    )
+    fixed = _fix_known_code_bugs(code)
+    assert ".dt.days" not in fixed
+    assert "_safe_days(" in fixed
+
+
+def test_fix_bugs_variable_dt_days() -> None:
+    """bare_var.dt.days is replaced with _safe_days(bare_var)."""
+    code = (
+        "import pandas as pd\n"
+        "def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+        "    duration = delta_col.dt.days\n"
+        "    return pd.DataFrame({'d': [duration]})\n"
+    )
+    fixed = _fix_known_code_bugs(code)
+    assert "delta_col.dt.days" not in fixed
+    assert "_safe_days(delta_col)" in fixed
+
+
+def test_fix_bugs_to_timedelta_dt_days() -> None:
+    """pd.to_timedelta(...).dt.days is also replaced (old bug pattern still caught)."""
+    code = (
+        "import pandas as pd\n"
+        "def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+        "    d = pd.to_timedelta(df['gap'], unit='d').dt.days\n"
+        "    return pd.DataFrame({'d': d})\n"
+    )
+    fixed = _fix_known_code_bugs(code)
+    assert ".dt.days" not in fixed
+
+
+def test_fix_bugs_no_dt_days_unchanged() -> None:
+    """Code with no .dt.days is passed through without inserting spurious replacements."""
+    code = (
+        "import pandas as pd\n"
+        "def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+        "    return pd.DataFrame({'a': range(row_count)})\n"
+    )
+    fixed = _fix_known_code_bugs(code)
+    # _safe_days helper is still injected, but no spurious replacements
+    assert "_safe_days(" not in fixed.split("def generate")[1]
+
+
+def test_fix_bugs_date_range_sample() -> None:
+    """pd.date_range(...).sample(...) is wrapped in pd.Series(...)."""
+    code = (
+        "import pandas as pd\n"
+        "def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+        "    dates = pd.date_range('2020-01-01', periods=100).sample(row_count)\n"
+        "    return pd.DataFrame({'date': dates})\n"
+    )
+    fixed = _fix_known_code_bugs(code)
+    assert "pd.Series(pd.date_range(" in fixed
+    assert ").sample(" in fixed
+
+
+def test_fix_bugs_idempotent() -> None:
+    """Applying _fix_known_code_bugs twice does not corrupt the code."""
+    code = (
+        "import pandas as pd\n"
+        "def generate(row_count: int, seed: int) -> pd.DataFrame:\n"
+        "    df['days'] = (df['end'] - df['start']).dt.days\n"
+        "    return df\n"
+    )
+    once = _fix_known_code_bugs(code)
+    twice = _fix_known_code_bugs(once)
+    # Second pass may expand helper again but must not break syntax
+    compile(twice, "<test_idempotent>", "exec")

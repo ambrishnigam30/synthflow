@@ -53,7 +53,7 @@ def mock_llm_client() -> MockLLMClient:
     so the orchestrator pipeline tests don't raise OrchestrationError.
     """
     client = MockLLMClient()
-    client.set_response("Glass Box", _MOCK_GLASS_BOX_SCRIPT)
+    client.set_response("value constants", _MOCK_GLASS_BOX_SCRIPT)
     return client
 
 

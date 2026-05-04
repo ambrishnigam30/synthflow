@@ -22,6 +22,7 @@ from typing import Any, Optional, Union
 
 import pandas as pd
 
+from synthflow.engines.code_synthesizer import _fix_known_code_bugs
 from synthflow.llm_client import LLMClient, MockLLMClient
 from synthflow.models.schemas import HealEvent
 from synthflow.utils.logger import get_logger
@@ -133,6 +134,10 @@ class SelfHealingRuntime:
         """
         # First, validate it's safe to execute (AST check — no sys/os abuse)
         self._ast_safety_check(script)
+
+        # Apply deterministic bug fixes before execution (catches .dt.days on
+        # TimedeltaIndex, DatetimeIndex.sample(), read-only rng.choice arrays).
+        script = _fix_known_code_bugs(script)
 
         # Write to temp file and exec via importlib
         with tempfile.NamedTemporaryFile(
@@ -261,7 +266,7 @@ class SelfHealingRuntime:
             code = re.sub(r"```python\s*", "", raw)
             code = re.sub(r"```\s*", "", code).strip()
             if "def generate" in code:
-                return code
+                return _fix_known_code_bugs(code)
         except Exception as exc:
             _LOG.warning("LLM heal call failed: %s", exc)
         return script  # Return unchanged if heal fails

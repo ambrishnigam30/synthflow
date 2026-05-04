@@ -25,42 +25,49 @@ from synthflow.utils.helpers import safe_json_loads
 
 
 def _fix_known_code_bugs(code: str) -> str:
-    """
-    Post-process LLM-generated code to fix known recurring bug patterns.
+    """Fix known LLM code generation bugs before execution."""
+    # Inject a safe timedelta helper before generate().
+    # TimedeltaIndex (result of datetime subtraction) has no .dt accessor;
+    # pd.Series of timedeltas does. _safe_days handles both transparently.
+    helper = (
+        "\n"
+        "# --- SynthFlow auto-injected helper ---\n"
+        "def _safe_days(td):\n"
+        "    import pandas as _pd\n"
+        "    if hasattr(td, 'dt'):\n"
+        "        return td.dt.days\n"
+        "    elif hasattr(td, 'days'):\n"
+        "        return td.days\n"
+        "    else:\n"
+        "        return _pd.to_timedelta(td).days\n"
+        "# --- end helper ---\n"
+        "\n"
+    )
+    if "def generate" in code:
+        code = code.replace("def generate", helper + "def generate", 1)
 
-    Every production code-generation system (Copilot, Cursor, etc.) has output
-    post-processing. This is the SynthFlow equivalent.
-    """
-    # Fix 1: pd.to_timedelta(...).dt.days → pd.to_timedelta(...).days
-    # TimedeltaIndex has no .dt accessor. .days works directly on TimedeltaIndex.
-    # Only apply on lines that actually contain 'to_timedelta' to avoid breaking
-    # legitimate Series.dt.days usages elsewhere.
-    fixed_lines = []
-    for line in code.split("\n"):
-        if "to_timedelta" in line and ".dt.days" in line:
-            line = line.replace(".dt.days", ".days")
-        fixed_lines.append(line)
-    code = "\n".join(fixed_lines)
+    # Brute-force: replace ALL parenthesised-expression.dt.days patterns.
+    # Catches (df['end'] - df['start']).dt.days regardless of to_timedelta.
+    # [^)]+ stops at the first ) so nested parens fall back to the variable rule.
+    code = re.sub(r"\(([^)]+)\)\.dt\.days", r"_safe_days(\1)", code)
 
-    # Fix 2: pd.date_range(...).sample(n) → pd.Series(pd.date_range(...)).sample(n)
-    # DatetimeIndex has no .sample() method; pandas Series does.
+    # Also handle bare variable.dt.days (e.g. delta_col.dt.days)
+    code = re.sub(r"(\w+)\.dt\.days", r"_safe_days(\1)", code)
+
+    # Fix DatetimeIndex.sample() — DatetimeIndex has no .sample(); Series does.
     code = re.sub(
         r"(pd\.date_range\([^)]+\))\.sample\(",
         r"pd.Series(\1).sample(",
         code,
     )
 
-    # Fix 3: rng.choice(pd.date_range(...)) → rng.choice(np.array(pd.date_range(...)))
-    # DatetimeIndex is read-only and cannot be passed directly to numpy rng.choice.
+    # Fix rng.choice(pd.date_range(...)) — DatetimeIndex is read-only for numpy.
+    # Wrap the argument (not the whole call) with np.array() and add .copy().
     code = re.sub(
         r"rng\.choice\((pd\.date_range\([^)]+\))",
         r"rng.choice(np.array(\1)",
         code,
     )
-
-    # Fix 4: rng.choice(result).copy() — numpy rng.choice on read-only arrays
-    # returns read-only view; .copy() makes it writeable for downstream assignment.
-    # Only add .copy() when result is immediately assigned to a df column.
     code = re.sub(
         r"(rng\.choice\(np\.array\(pd\.date_range\([^)]+\)\)[^)]*\))",
         r"\1.copy()",
@@ -98,12 +105,9 @@ _SYNTHESIZER_SYSTEM_PROMPT = (
 
 _SYNTHESIZER_USER_TEMPLATE = (
     "ORIGINAL USER REQUEST: {user_prompt}\n\n"
-    "Generate a Glass Box synthetic data script for this exact request. "
-    "The code MUST be COMPLETELY SELF-CONTAINED — embed all entity lists (names, hospitals, "
-    "cities, diagnoses, products) directly as Python constants in the code. "
-    "Use your own knowledge to populate these lists for the specified region and domain. "
-    "If the value pools below are empty or incomplete, use your own knowledge to create "
-    "appropriate lists — do NOT leave any value pool empty.\n\n"
+    "Your code must be self-contained. Embed all entity lists as Python constants. "
+    "Use your knowledge of the specified region for names, institutions, and values. "
+    "If value pools above are empty, create appropriate lists yourself.\n\n"
     "- Table: {table_name}\n"
     "- Columns: {columns}\n"
     "- Domain: {domain}\n"
